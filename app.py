@@ -12,12 +12,12 @@ def init_supabase() -> Client:
 if "supabase" not in st.session_state:
     st.session_state.supabase = init_supabase()
 
-# Declare Full Four-Page Architecture Layout
+# FIXED: Re-mapped paths to point to 'views/' to terminate the background duplicator bug
 pages = [
-    st.Page("pages/1_About_Us.py", title="Classic Industries Home", icon="🏢", default=True),
-    st.Page("pages/2_Stock_Master.py", title="Stock Master Dashboard", icon="📊"),
-    st.Page("pages/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝"),
-    st.Page("pages/4_System_Guide.py", title="System User Guide", icon="📘")
+    st.Page("views/1_About_Us.py", title="Classic Industries Home", icon="🏢", default=True),
+    st.Page("views/2_Stock_Master.py", title="Stock Master Dashboard", icon="📊"),
+    st.Page("views/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝"),
+    st.Page("views/4_System_Guide.py", title="System User Guide", icon="📘")
 ]
 
 # Run Core Navigation Controller
