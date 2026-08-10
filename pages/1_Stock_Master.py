@@ -72,42 +72,34 @@ try:
 
         st.markdown("---")
         
-        # 7. Build the Round Graph (Altair Layered Donut Chart with Perfectly Centered Clean Black Text)
-        st.write("### 🍩 Shop Floor Operational Status Breakdown (With Part Counts)")
+        # 7. Render Clean Side-by-Side Visuals Layout
+        st.write("### 🍩 Shop Floor Operational Status Breakdown")
         
         status_counts = summary['Production Status'].value_counts().reset_index()
-        status_counts.columns = ['Status', 'Count']
+        status_counts.columns = ['Status', 'Total Part Models']
         
         color_scale = alt.Scale(
             domain=['In Progress', 'Complete', 'Delayed'],
             range=['#3498db', '#2ecc71', '#e74c3c'] 
         )
         
-        # Base Ring Element
-        base_chart = alt.Chart(status_counts).encode(
-            theta=alt.Theta(field="Count", type="quantitative"),
-            color=alt.Color(field="Status", type="nominal", scale=color_scale, legend=alt.Legend(title="Batch Status"))
-        )
+        # Clean, solid donut ring graph (without the overlapping text engine bugs)
+        donut_chart = alt.Chart(status_counts).mark_arc(innerRadius=65, outerRadius=110, stroke='#fff').encode(
+            theta=alt.Theta(field="Total Part Models", type="quantitative"),
+            color=alt.Color(field="Status", type="nominal", scale=color_scale, legend=alt.Legend(title="Batch Status")),
+            tooltip=[alt.Tooltip('Status', title='Status'), alt.Tooltip('Total Part Models', title='Total Part Models')]
+        ).properties(width=320, height=260).configure_view(strokeWidth=0)
         
-        donut_ring = base_chart.mark_arc(innerRadius=65, outerRadius=110, stroke='#fff')
+        # Side-by-side presentation columns
+        graph_col, data_summary_col = st.columns([1.2, 1])
         
-        # PERFECTED: Text is set to clean, regular, centered black text
-        segment_labels = base_chart.mark_text(
-            radius=99, 
-            size=16, 
-            color="black",       # Clean high-contrast black font color
-            align="center",      # Perfectly centered horizontally
-            baseline="middle"    # Perfectly centered vertically
-        ).encode(
-            text=alt.Text(field="Count", type="quantitative", format="d")
-        )
-        
-        # Merge elements using the layering operator
-        final_chart = (donut_ring + segment_labels).properties(width=400, height=300).configure_view(strokeWidth=0)
-        
-        graph_col, pad_col = st.columns(2)
         with graph_col:
-            st.altair_chart(final_chart, use_container_width=True)
+            st.altair_chart(donut_chart, use_container_width=True)
+            
+        with data_summary_col:
+            st.markdown("<br><br>", unsafe_allow_html=True) # Aligns summary box with the chart center
+            st.write("**Real-time Status Count Matrix:**")
+            st.dataframe(status_counts, use_container_width=True, hide_index=True)
 
         st.markdown("---")
 
