@@ -72,7 +72,7 @@ try:
 
         st.markdown("---")
         
-        # 7. Build the Round Graph (Altair Layered Donut Chart with Direct Counts)
+        # 7. Build the Round Graph (Altair Layered Donut Chart with High-Contrast Direct Counts)
         st.write("### 🍩 Shop Floor Operational Status Breakdown (With Part Counts)")
         
         status_counts = summary['Production Status'].value_counts().reset_index()
@@ -91,8 +91,8 @@ try:
         
         donut_ring = base_chart.mark_arc(innerRadius=65, outerRadius=110, stroke='#fff')
         
-        # Overlay Labels Element (Displays exact model counts inside each segment)
-        segment_labels = base_chart.mark_text(radius=88, size=14, fontWeight="bold", color="white").encode(
+        # FIXED: Changed color parameter to bold black ("#000000") and shifted radius out slightly to ensure high contrast
+        segment_labels = base_chart.mark_text(radius=125, size=15, fontWeight="bold", color="#000000").encode(
             text=alt.Text(field="Count", type="quantitative", format="d")
         )
         
