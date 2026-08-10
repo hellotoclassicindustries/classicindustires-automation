@@ -1,6 +1,10 @@
 import streamlit as st
 import os
+ #1. FIXED: Explicit title block restored at the very top of the script
+st.title("🏢 Classic Industries")
+st.subheader("Foundry Friends & Finishers Division")
 
+st.markdown("---")
 # 1. Main Hero Image Header Configuration
 hero_path = "assets/main_hero.jpg"
 if os.path.exists(hero_path):
