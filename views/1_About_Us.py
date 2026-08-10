@@ -1,10 +1,6 @@
 import streamlit as st
 import os
 
-# FIXED: Re-structured the company name hierarchy to put Classic Industries first
-st.title("🏢 Classic Industries")
-st.subheader("Foundry Friends & Finishers Division")
-
 # 1. Main Hero Image Header Configuration
 hero_path = "assets/main_hero.jpg"
 if os.path.exists(hero_path):
@@ -100,27 +96,3 @@ with tab_team:
     *   **Operator Rosters** (Assigned stations for fitting, grinding, and inspection loops).
     *   **Quality Inspector Badges** (Authorized personnel confirming casting dispatch codes).
     """)
-import streamlit as st
-from supabase import create_client, Client
-
-st.set_page_config(page_title="Classic Industries Portal", layout="wide", page_icon="🏭")
-
-# Initialize and Cache Supabase Connection Stack
-@st.cache_resource
-def init_supabase() -> Client:
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-
-if "supabase" not in st.session_state:
-    st.session_state.supabase = init_supabase()
-
-# Declare Full Four-Page Architecture Layout
-pages = [
-    st.Page("pages/1_About_Us.py", title="Classic Industries Home", icon="🏢", default=True),
-    st.Page("pages/2_Stock_Master.py", title="Stock Master Dashboard", icon="📊"),
-    st.Page("pages/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝"),
-    st.Page("pages/4_System_Guide.py", title="System User Guide", icon="📘")
-]
-
-# Run Core Navigation Controller
-pg = st.navigation(pages)
-pg.run()
