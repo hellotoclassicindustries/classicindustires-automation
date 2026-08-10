@@ -12,24 +12,24 @@ supabase = st.session_state.supabase
 TABLE_NAME = st.secrets["TABLE_NAME"]
 
 try:
-    # 1. Fetch data payload layers from both tables
-    ledger_res = supabase.table(TABLE_NAME).select("entry_type, qty_nos, part_number, date").execute()
-    items_res = supabase.table("item_master").select("part_number, description").execute()
-    
+    # 1. Fetch data from your core staging ledger (pulling the description field from rows)
+    ledger_res = supabase.table(TABLE_NAME).select("entry_type, qty_nos, part_number, date, description").execute()
     ledger_records = ledger_res.data
-    item_records = items_res.data
 
     if ledger_records:
-        # Convert layers into pandas structures
+        # Convert raw records into a structured Pandas DataFrame
         df_ledger = pd.DataFrame(ledger_records)
-        df_items = pd.DataFrame(item_records) if item_records else pd.DataFrame(columns=["part_number", "description"])
         
-        # Standardize numeric parameters and dates safely
+        # Standardize data types to prevent calculation bugs
         df_ledger['qty_nos'] = pd.to_numeric(df_ledger['qty_nos'], errors='coerce').fillna(0).astype(int)
         df_ledger['entry_type'] = df_ledger['entry_type'].astype(str).str.strip().str.lower()
         df_ledger['date'] = pd.to_datetime(df_ledger['date'], errors='coerce')
+        df_ledger['description'] = df_ledger['description'].astype(str).str.strip().str.upper()
 
-        # 2. Build Core Pivot Aggregation Framework tracking First Arrival & Last Updated per Part Number
+        # 2. Extract the newest/latest description available for each individual part number
+        desc_mapping = df_ledger.sort_values('date').groupby('part_number')['description'].last().to_dict()
+
+        # 3. Build Core Pivot Aggregation Framework per Part Number
         summary = df_ledger.groupby('part_number').apply(lambda x: pd.Series({
             'Total Inward': x[x['entry_type'] == 'inward']['qty_nos'].sum(),
             'Total Outward': x[x['entry_type'] == 'outward']['qty_nos'].sum(),
@@ -38,28 +38,25 @@ try:
             'Last Updated': x['date'].max()
         }), include_groups=False).reset_index()
 
-        # 3. Bring in Part Descriptions from the Item Master Table
-        summary = pd.merge(summary, df_items, on='part_number', how='left')
-        summary['description'] = summary['description'].fillna("Description Not Registered").astype(str).str.upper()
+        # 4. Apply Descriptions directly using our dynamic ledger mapping
+        summary['description'] = summary['part_number'].map(desc_mapping).fillna("UNKNOWN SPECIFICATION")
 
-        # 4. Compute Dynamic Status Values Based on New 5-Day Arrival Rule
+        # 5. Compute Dynamic Status Values Based on Your 5-Day Arrival Rule
         today = pd.Timestamp(datetime.now(timezone.utc).date())
-        
-        # Safe fallback if a part somehow doesn't have an inward entry date
         summary['First Arrival'] = summary['First Arrival'].fillna(summary['Last Updated'])
         
         conditions = [
-            (summary['Current WIP Balance'] <= 0), # Balance is zero -> Complete
-            ((today - summary['First Arrival'].dt.tz_localize(None)).dt.days > 5) # Open balance and > 5 days since arrival -> Delayed
+            (summary['Current WIP Balance'] <= 0),
+            ((today - summary['First Arrival'].dt.tz_localize(None)).dt.days > 5)
         ]
         choices = ['Complete', 'Delayed']
         summary['Production Status'] = np.select(conditions, choices, default='In Progress')
 
-        # Format dates cleanly for the final table display panel
+        # Format dates cleanly for display purposes
         summary['First Arrival Date'] = summary['First Arrival'].dt.strftime('%Y-%m-%d').fillna("N/A")
         summary['Last Updated Date'] = summary['Last Updated'].dt.strftime('%Y-%m-%d').fillna("N/A")
 
-        # 5. Render Core Top-Level KPI Metric Blocks
+        # 6. Render Core Top-Level KPI Metric Blocks
         kpi1, kpi2, kpi3 = st.columns(3)
         with kpi1:
             st.metric(label="Total Balance Remaining (WIP)", value=f"{summary['Current WIP Balance'].sum():,} Pcs")
@@ -76,7 +73,7 @@ try:
 
         st.markdown("---")
         
-        # 6. Build the Round Graph (Altair Donut Chart Component)
+        # 7. Build the Round Graph (Altair Donut Chart Component)
         st.write("### 🍩 Shop Floor Operational Status Breakdown")
         
         status_counts = summary['Production Status'].value_counts().reset_index()
@@ -100,10 +97,9 @@ try:
 
         st.markdown("---")
 
-        # 7. Render Upgraded "Current Calculated Stock Summary Table"
+        # 8. Render Upgraded "Current Calculated Stock Summary Table"
         st.write("### 📋 Perfected Current Calculated Stock Summary Table")
         
-        # Re-arrange table columns to surface both arrival and status variables seamlessly
         ordered_display_df = summary[[
             'part_number', 'description', 'Production Status', 
             'Total Inward', 'Total Outward', 'Current WIP Balance', 
