@@ -95,7 +95,7 @@ try:
         segment_labels = base_chart.mark_text(
             radius=88, 
             size=14, 
-            color="black",       # Clean high-contrast black font color
+            color="white",       # Clean high-contrast black font color
             align="center",      # Perfectly centered horizontally
             baseline="middle"    # Perfectly centered vertically
         ).encode(
