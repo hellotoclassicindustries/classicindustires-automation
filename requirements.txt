@@ -1,2 +1,5 @@
-streamlit
-supabase
+streamlit>=1.35.0
+supabase>=2.4.0
+pandas>=2.0.0
+altair>=5.0.0
+postgrest>=0.10.0
