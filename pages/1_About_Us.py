@@ -1,15 +1,16 @@
 import streamlit as st
 import os
 
-st.title("🏢 Foundry Friends & Finishers")
-st.subheader("The Ultimate Finishing Partner for Castings & Precision Jobwork")
+# FIXED: Re-structured the company name hierarchy to put Classic Industries first
+st.title("🏢 Classic Industries")
+st.subheader("Foundry Friends & Finishers Division")
 
-# 1. Main Hero Image Header Configuration with a safe placeholder fallback
+# 1. Main Hero Image Header Configuration
 hero_path = "assets/main_hero.jpg"
 if os.path.exists(hero_path):
     st.image(
         hero_path, 
-        caption="Foundry Friends & Finishers — Advanced Metal Finishing Shop Floor",
+        caption="Classic Industries — Foundry Friends & Finishers Advanced Metal Shop Floor",
         use_container_width=True
     )
 else:
@@ -25,22 +26,27 @@ with tab_about:
     with col1:
         st.write("### 🤝 Who We Are")
         st.markdown("""
-        Welcome to **Foundry Friends & Finishers** (An Internal Operations Platform for Classic Industries). 
-        We operate as the dedicated finishing partner for modern foundries. Rough raw castings straight out of the sand molds 
-        need specialized care before they hit the market—and that is exactly where we come in.
+        Welcome to the **Foundry Friends & Finishers** division of **Classic Industries**. 
+        We operate as a premium, high-volume multi-process jobwork hub optimized to handle raw, rough casting outputs 
+        straight out of foundry sand molds. 
+        
+        Our specialized lines take rough metal castings and perform precision bench fitting, edge grinding, 
+        seam linishing, and dimensional alignment loops to transform rough metal parts into production-ready components.
         
         This application interfaces directly with our high-speed cloud database layers to convert document data 
         points into live, actionable shop floor asset values.
         """)
         
-        st.write("### ⏱️ Facility Reference Matrix")
+        st.write("### ⏱️ Corporate Facility Reference Matrix")
         st.markdown("""
+        *   **Company Name:** Classic Industries
+        *   **Division Core:** Foundry Friends & Finishers (Casting Processing Hub)
         *   **Operational Hours:** 08:00 AM – 08:00 PM (Monday – Saturday)
         *   **System Classification:** Internal ERP Dashboard Deployment Suite
         *   **Automation Core:** Powered by deep extraction AI models converting delivery challans seamlessly.
         """)
     with col2:
-        st.info("🗺️ **Foundry Friends Production Plant**")
+        st.info("🗺️ **Classic Industries Plant Network**")
         st.markdown("""
         Our specialized manufacturing facilities are optimized for high-volume casting processing, 
         featuring automated inbound document capture infrastructure.
