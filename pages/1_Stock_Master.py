@@ -72,7 +72,7 @@ try:
 
         st.markdown("---")
         
-        # 7. Build the Round Graph (Altair Layered Donut Chart with Perfectly Centered Text)
+        # 7. Build the Round Graph (Altair Layered Donut Chart with Perfectly Centered Clean Black Text)
         st.write("### 🍩 Shop Floor Operational Status Breakdown (With Part Counts)")
         
         status_counts = summary['Production Status'].value_counts().reset_index()
@@ -91,13 +91,13 @@ try:
         
         donut_ring = base_chart.mark_arc(innerRadius=65, outerRadius=110, stroke='#fff')
         
-        # FIXED: Removed bold/stroke properties and added align/baseline configuration parameters
+        # PERFECTED: Text is set to clean, regular, centered black text
         segment_labels = base_chart.mark_text(
             radius=88, 
             size=14, 
-            color="white",
-            align="center",      # Horizontally centers the text bounding container
-            baseline="middle"    # Vertically centers the text bounding container
+            color="black",       # Clean high-contrast black font color
+            align="center",      # Perfectly centered horizontally
+            baseline="middle"    # Perfectly centered vertically
         ).encode(
             text=alt.Text(field="Count", type="quantitative", format="d")
         )
