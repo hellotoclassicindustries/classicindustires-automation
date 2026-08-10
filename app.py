@@ -1,7 +1,8 @@
 import streamlit as st
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Foundry Friends Portal", layout="wide", page_icon="🏭")
+# Set wide page layout to handle multi-column tables cleanly
+st.set_page_config(page_title="Classic Industries Portal", layout="wide", page_icon="🏭")
 
 # Initialize and Cache Supabase Engine Network Stack
 @st.cache_resource
@@ -11,11 +12,12 @@ def init_supabase() -> Client:
 if "supabase" not in st.session_state:
     st.session_state.supabase = init_supabase()
 
-# Declare Revised Clean Multi-Page Architecture Blueprint
+# Declare Full Four-Page Architecture Layout
 pages = [
-    st.Page("pages/1_About_Us.py", title="Foundry Friends Home", icon="🏢", default=True),
+    st.Page("pages/1_About_Us.py", title="Classic Industries Home", icon="🏢", default=True),
     st.Page("pages/2_Stock_Master.py", title="Stock Master Dashboard", icon="📊"),
-    st.Page("pages/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝")
+    st.Page("pages/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝"),
+    st.Page("pages/4_System_Guide.py", title="System User Guide", icon="📘")
 ]
 
 # Run Core Navigation Controller
