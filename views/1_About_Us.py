@@ -41,7 +41,8 @@ with tab_about:
         st.markdown("""
         *   **Company Name:** Classic Industries
         *   **Division Core:** Foundry Friends & Finishers (Casting Processing Hub)
-        *   **Operational Hours:** 08:00 AM – 08:00 PM (Monday – Saturday)
+        *   **Plant Operations:** 🔄 **24x7 Continuous Production Shifts**
+        *   **Helpdesk & IT Support:** 📞 **08:00 AM – 05:00 PM** (Monday – Saturday)
         *   **System Classification:** Internal ERP Dashboard Deployment Suite
         *   **Automation Core:** Powered by deep extraction AI models converting delivery challans seamlessly.
         """)
