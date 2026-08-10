@@ -55,7 +55,7 @@ try:
         summary['First Arrival Date'] = summary['First Arrival'].dt.strftime('%Y-%m-%d').fillna("N/A")
         summary['Last Updated Date'] = summary['Last Updated'].dt.strftime('%Y-%m-%d').fillna("N/A")
 
-        # 6. Render Perfected, Plain-Language KPI Metrics
+        # 6. Render Plain-Language KPI Metrics
         kpi1, kpi2, kpi3 = st.columns(3)
         with kpi1:
             st.metric(label="Total Physical Stock on Shop Floor", value=f"{summary['Current WIP Balance'].sum():,} Pcs")
@@ -89,7 +89,8 @@ try:
             tooltip=[alt.Tooltip('Status', title='Status'), alt.Tooltip('Count', title='Total Batches')]
         ).properties(width=400, height=300).configure_view(strokeWidth=0)
         
-        graph_col, pad_col = st.columns()
+        # FIXED: Explicitly passed '2' into st.columns to prevent LayoutsMixin error
+        graph_col, pad_col = st.columns(2)
         with graph_col:
             st.altair_chart(donut_chart, use_container_width=True)
 
