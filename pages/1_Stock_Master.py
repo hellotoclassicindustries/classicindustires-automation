@@ -12,21 +12,20 @@ supabase = st.session_state.supabase
 TABLE_NAME = st.secrets["TABLE_NAME"]
 
 try:
-    # 1. Fetch data from your core staging ledger (pulling the description field from rows)
+    # 1. Fetch data from your core staging ledger
     ledger_res = supabase.table(TABLE_NAME).select("entry_type, qty_nos, part_number, date, description").execute()
     ledger_records = ledger_res.data
 
     if ledger_records:
-        # Convert raw records into a structured Pandas DataFrame
         df_ledger = pd.DataFrame(ledger_records)
         
-        # Standardize data types to prevent calculation bugs
+        # Standardize data types
         df_ledger['qty_nos'] = pd.to_numeric(df_ledger['qty_nos'], errors='coerce').fillna(0).astype(int)
         df_ledger['entry_type'] = df_ledger['entry_type'].astype(str).str.strip().str.lower()
         df_ledger['date'] = pd.to_datetime(df_ledger['date'], errors='coerce')
         df_ledger['description'] = df_ledger['description'].astype(str).str.strip().str.upper()
 
-        # 2. Extract the newest/latest description available for each individual part number
+        # 2. Extract the latest description available for each part number
         desc_mapping = df_ledger.sort_values('date').groupby('part_number')['description'].last().to_dict()
 
         # 3. Build Core Pivot Aggregation Framework per Part Number
@@ -38,10 +37,10 @@ try:
             'Last Updated': x['date'].max()
         }), include_groups=False).reset_index()
 
-        # 4. Apply Descriptions directly using our dynamic ledger mapping
+        # 4. Apply Descriptions
         summary['description'] = summary['part_number'].map(desc_mapping).fillna("UNKNOWN SPECIFICATION")
 
-        # 5. Compute Dynamic Status Values Based on Your 5-Day Arrival Rule
+        # 5. Compute Status Values based on 5-day arrival logic
         today = pd.Timestamp(datetime.now(timezone.utc).date())
         summary['First Arrival'] = summary['First Arrival'].fillna(summary['Last Updated'])
         
@@ -52,21 +51,21 @@ try:
         choices = ['Complete', 'Delayed']
         summary['Production Status'] = np.select(conditions, choices, default='In Progress')
 
-        # Format dates cleanly for display purposes
+        # Format dates for table display
         summary['First Arrival Date'] = summary['First Arrival'].dt.strftime('%Y-%m-%d').fillna("N/A")
         summary['Last Updated Date'] = summary['Last Updated'].dt.strftime('%Y-%m-%d').fillna("N/A")
 
-        # 6. Render Core Top-Level KPI Metric Blocks
+        # 6. Render Perfected, Plain-Language KPI Metrics
         kpi1, kpi2, kpi3 = st.columns(3)
         with kpi1:
-            st.metric(label="Total Balance Remaining (WIP)", value=f"{summary['Current WIP Balance'].sum():,} Pcs")
+            st.metric(label="Total Physical Stock on Shop Floor", value=f"{summary['Current WIP Balance'].sum():,} Pcs")
         with kpi2:
-            st.metric(label="Unique Configurations Managed", value=len(summary))
+            st.metric(label="Distinct Part Types Active", value=f"{len(summary)} Models")
         with kpi3:
             delayed_count = len(summary[summary['Production Status'] == 'Delayed'])
             st.metric(
-                label="Delayed Part Batches (>5 Days old)", 
-                value=f"{delayed_count} Configs", 
+                label="Overdue Part Types (>5 Days old)", 
+                value=f"{delayed_count} Models", 
                 delta=f"{delayed_count} Overdue" if delayed_count > 0 else "All Clear", 
                 delta_color="inverse"
             )
@@ -79,7 +78,6 @@ try:
         status_counts = summary['Production Status'].value_counts().reset_index()
         status_counts.columns = ['Status', 'Count']
         
-        # Syncing color hex configurations with production tracking codes
         color_scale = alt.Scale(
             domain=['In Progress', 'Complete', 'Delayed'],
             range=['#3498db', '#2ecc71', '#e74c3c'] 
@@ -91,13 +89,13 @@ try:
             tooltip=[alt.Tooltip('Status', title='Status'), alt.Tooltip('Count', title='Total Batches')]
         ).properties(width=400, height=300).configure_view(strokeWidth=0)
         
-        graph_col, pad_col = st.columns([2, 1])
+        graph_col, pad_col = st.columns()
         with graph_col:
             st.altair_chart(donut_chart, use_container_width=True)
 
         st.markdown("---")
 
-        # 8. Render Upgraded "Current Calculated Stock Summary Table"
+        # 8. Render Summary Table
         st.write("### 📋 Perfected Current Calculated Stock Summary Table")
         
         ordered_display_df = summary[[
