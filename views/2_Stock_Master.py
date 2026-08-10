@@ -47,7 +47,7 @@ try:
         
         # Global metric variables
         current_wip_stock = inward_df["qty_nos"].sum() - outward_df["qty_nos"].sum()
-        # --------------------------------------------------------------------------
+                # --------------------------------------------------------------------------
         # 🧠 FIFO BATCH ALLOCATION ENGINE: TRACK DELIVERED VS REMAINING
         # --------------------------------------------------------------------------
         # Step A: Build the independent Inward Lot Queues per Part Number
@@ -119,9 +119,12 @@ try:
                     status = "Delayed / Overdue"
                 else:
                     status = "In Progress"
+                
+                # UPDATED: Reconstructed the exact target structural string naming sequence
+                combined_lot_code = f"{lot['lot_id']}_{lot['part_number']}_{lot['challan_no']}"
                     
                 flattened_records.append({
-                    "Lot Code": lot["lot_id"],
+                    "Lot Code": combined_lot_code, # <-- Maps clean combined tracker string
                     "Part Number": lot["part_number"],
                     "Part Description": lot["description"],
                     "Challan Number (B)": lot["challan_no"],
