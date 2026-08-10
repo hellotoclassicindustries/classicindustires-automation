@@ -93,9 +93,9 @@ try:
         
         # PERFECTED: Text is set to clean, regular, centered black text
         segment_labels = base_chart.mark_text(
-            radius=88, 
-            size=14, 
-            color="white",       # Clean high-contrast black font color
+            radius=99, 
+            size=16, 
+            color="black",       # Clean high-contrast black font color
             align="center",      # Perfectly centered horizontally
             baseline="middle"    # Perfectly centered vertically
         ).encode(
