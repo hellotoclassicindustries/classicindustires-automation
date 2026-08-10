@@ -72,8 +72,8 @@ try:
 
         st.markdown("---")
         
-        # 7. Build the Round Graph (Altair Donut Chart Component)
-        st.write("### 🍩 Shop Floor Operational Status Breakdown")
+        # 7. Build the Round Graph (Altair Layered Donut Chart with Direct Counts)
+        st.write("### 🍩 Shop Floor Operational Status Breakdown (With Part Counts)")
         
         status_counts = summary['Production Status'].value_counts().reset_index()
         status_counts.columns = ['Status', 'Count']
@@ -83,16 +83,25 @@ try:
             range=['#3498db', '#2ecc71', '#e74c3c'] 
         )
         
-        donut_chart = alt.Chart(status_counts).mark_arc(innerRadius=65, stroke='#fff').encode(
+        # Base Ring Element
+        base_chart = alt.Chart(status_counts).encode(
             theta=alt.Theta(field="Count", type="quantitative"),
-            color=alt.Color(field="Status", type="nominal", scale=color_scale, legend=alt.Legend(title="Batch Status")),
-            tooltip=[alt.Tooltip('Status', title='Status'), alt.Tooltip('Count', title='Total Batches')]
-        ).properties(width=400, height=300).configure_view(strokeWidth=0)
+            color=alt.Color(field="Status", type="nominal", scale=color_scale, legend=alt.Legend(title="Batch Status"))
+        )
         
-        # FIXED: Explicitly passed '2' into st.columns to prevent LayoutsMixin error
+        donut_ring = base_chart.mark_arc(innerRadius=65, outerRadius=110, stroke='#fff')
+        
+        # Overlay Labels Element (Displays exact model counts inside each segment)
+        segment_labels = base_chart.mark_text(radius=88, size=14, fontWeight="bold", color="white").encode(
+            text=alt.Text(field="Count", type="quantitative", format="d")
+        )
+        
+        # Merge elements using the layering operator
+        final_chart = (donut_ring + segment_labels).properties(width=400, height=300).configure_view(strokeWidth=0)
+        
         graph_col, pad_col = st.columns(2)
         with graph_col:
-            st.altair_chart(donut_chart, use_container_width=True)
+            st.altair_chart(final_chart, use_container_width=True)
 
         st.markdown("---")
 
