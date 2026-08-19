@@ -2,11 +2,15 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 
+# Initialize Secure Supabase Target Connections
 url: str = st.secrets["SUPABASE_URL"]
 key: str = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
 
 def fetch_raw_ledger_payload():
+    """
+    Fetches raw transactional parameters from your Supabase backend.
+    """
     try:
         response = supabase.table("staging_ledger") \
             .select("part_number, description, entry_type, ref_challan_no, challan_no, qty_nos") \
@@ -17,6 +21,7 @@ def fetch_raw_ledger_payload():
         st.error(f"Error fetching database values: {str(e)}")
         return []
 
+# Set up Dashboard Grid Layout Presentation
 st.set_page_config(page_title="ClassicIndustries | Stock Master", layout="wide")
 st.title("📦 Live Work-In-Progress (WIP) Stock Master")
 st.markdown("---")
@@ -35,7 +40,7 @@ if raw_data:
         qty = int(row["qty_nos"])
         
         if row["entry_type"].strip().lower() == "inward":
-            lot_id = row["challan_no"].strip().upper() # Inward lot number
+            lot_id = row["challan_no"].strip().upper() // Inward lot number
             
             # Update the global pool counts
             if part not in global_stock:
@@ -48,7 +53,7 @@ if raw_data:
                 lot_stock[lot_key] = {"description": desc, "available": 0}
             lot_stock[lot_key]["available"] += qty
 
-    # 3. Second Pass: Process dispatches and handle "NO-REF" logic paths safely
+    # 3. Second Pass: Process dispatches and handle "NO-REF" logic paths safely via hybrid fallback
     for row in raw_data:
         if row["entry_type"].strip().lower() == "outward":
             part = row["part_number"].strip().upper()
@@ -65,36 +70,70 @@ if raw_data:
                 if lot_key in lot_stock:
                     lot_stock[lot_key]["available"] -= qty
             else:
-                # 💡 HYBRID ADAPTIVE FALLBACK RULE: 
-                # If an item is marked "NO-REF", the code avoids lot lockouts.
-                # It automatically finds the oldest active inward lot for that part number 
-                # and subtracts the quantity from there to keep your batch records straight.
+                # HYBRID ADAPTIVE FALLBACK RULE: Deduct from oldest available matching part lot
                 for (lot_part, lot_id) in lot_stock.keys():
                     if lot_part == part and lot_stock[(lot_part, lot_id)]["available"] >= qty:
                         lot_stock[(lot_part, lot_id)]["available"] -= qty
                         break
 
-    # 4. Format and display data tables on screen
+    # 4. Render Consolidated Global Balances Section
     st.subheader("📋 Consolidated Global Part Balances")
     global_rows = []
     for part, details in global_stock.items():
         global_rows.append({
             "Part Number": part,
             "Item Description": details["description"],
-            "Net Available Stock (Nos)": details["available"]
+            "Net Available Stock (Nos)": max(0, details["available"]) # Floors at 0 for safety display
         })
     st.dataframe(pd.DataFrame(global_rows), use_container_width=True)
     
     st.markdown("---")
-    st.subheader("🔍 Lot-by-Lot Traceability Breakdown")
+    
+    # 5. Formulate Dataframe for Lot-by-Lot Traceability & Graphs
     lot_rows = []
+    chart_data_rows = []
+    
     for (part, lot_id), details in lot_stock.items():
+        available_balance = max(0, details["available"])
+        
         lot_rows.append({
             "Part Number": part,
             "Inward Lot Identity": lot_id,
             "Item Description": details["description"],
-            "Lot Remaining WIP Balance": details["available"]
+            "Lot Remaining WIP Balance": available_balance
         })
-    st.dataframe(pd.DataFrame(lot_rows), use_container_width=True)
+        
+        # Format a clean string name for the chart labels (e.g., "W50217101Z1 (Lot: RMCL/0134)")
+        if available_balance > 0:
+            chart_data_rows.append({
+                "Lot Reference": f"{part} ({lot_id})",
+                "Available Stock": available_balance
+            })
+            
+    df_lots = pd.DataFrame(lot_rows)
+    df_chart = pd.DataFrame(chart_data_rows)
+    
+    # 6. Render Side-by-Side Table and Bar Chart Section using Columns Layout
+    st.subheader("🔍 Lot-by-Lot Traceability Breakdown & Stock Allocation Chart")
+    
+    view_col1, view_col2 = st.columns([1.1, 0.9]) # Splits screen ratio elegantly
+    
+    with view_col1:
+        st.markdown("**Live Ledger Inventory Matrix**")
+        st.dataframe(df_lots, use_container_width=True, height=400)
+        
+    with view_col2:
+        st.markdown("**Lot Remaining WIP Balance Levels**")
+        if not df_chart.empty:
+            # Renders an interactive bar graph tracking exact lot saturation levels natively
+            st.bar_chart(
+                data=df_chart,
+                x="Lot Reference",
+                y="Available Stock",
+                color="#0068c9", # Clear manufacturing blueprint blue branding tone
+                use_container_width=True
+            )
+        else:
+            st.info("All scanned component lots have been fully exhausted. Graph is empty.")
 else:
     st.info("No validated transaction entries are currently available to compute stock numbers.")
