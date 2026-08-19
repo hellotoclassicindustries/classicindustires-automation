@@ -148,7 +148,8 @@ if raw_data:
             
             st.bar_chart(
                 data=chart_pivot,
-                color=["#ff4b4b", "#0068c9"], # Red = Shipped Outward | Blue = Remaining WIP Inventory
+                #color=["#ff4b4b", "#0068c9"], # Red = Shipped Outward | Blue = Remaining WIP Inventory
+                color=["#29b573", "#0068c9"], # Green = Shipped Outward | Blue = Remaining WIP Inventory
                 use_container_width=True,
                 height=420
             )
