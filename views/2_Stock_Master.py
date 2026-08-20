@@ -34,16 +34,8 @@ if raw_data:
     # 1. Initialize data registries for clean partwise grouping arrays
     part_timeline_logs = []
     sample_assets = {}
-    bulk_production_parts = set() # Tracks parts that have a history of bulk production runs
 
-    # PASS 1: Build a master index of all parts that have had commercial bulk runs
-    for row in raw_data:
-        part = str(row["part_number"]).strip().upper()
-        qty = int(row["qty_nos"])
-        if qty > 5: # If the part has ever arrived in a quantity greater than 5, it is classified as a commercial product
-            bulk_production_parts.add(part)
-
-    # PASS 2: Process transaction blocks and accurately isolate true samples
+    # 2. Unified Pass: Process transaction blocks and completely isolate samples based STRICTLY on text notes
     for row in raw_data:
         part = str(row["part_number"]).strip().upper()
         desc = str(row["description"]).strip().upper()
@@ -51,13 +43,12 @@ if raw_data:
         remarks = str(row["remarks_notes"]).strip().upper()
         entry_type = row["entry_type"].strip().lower()
         
-        # 🔬 HARDENED TWO-WAY SAMPLE IDENTIFICATION ENGNE:
-        # Check A: Does the text notes explicitly state "SAMPLE"?
-        # Check B: Is it an INWARD shipment of exactly 1 piece AND has no history of bulk production?
-        is_explicit_sample = ("SAMPLE" in remarks or "SAMPLE" in part or "SAMPLE" in desc)
-        is_single_piece_prototype = (entry_type == "inward" and qty == 1 and part not in bulk_production_parts)
+        # 🔬 STRICT TEXT REMARKS GATING RULE:
+        # Relies 100% on the explicit written label "SAMPLE" inside your remarks/notes context.
+        # Quantity loops are completely ignored here to ensure structural accuracy across historical logs.
+        is_sample = ("SAMPLE" in remarks or "SAMPLE" in part or "SAMPLE" in desc)
         
-        if is_explicit_sample or is_single_piece_prototype:
+        if is_sample:
             lot_id = row["challan_no"].strip().upper() if entry_type == "inward" else "RETAINED"
             if part not in sample_assets:
                 sample_assets[part] = {"description": desc, "qty": 0, "challans": set()}
@@ -65,7 +56,7 @@ if raw_data:
             sample_assets[part]["challans"].add(lot_id)
             continue # Isolates verified samples from active production stock immediately
             
-        # Log all valid production items (including multi-piece PTO parts and leftover individual items)
+        # Log all valid items (including PTO parts and single pieces) into production tracks
         try:
             row_date = datetime.strptime(str(row["date"]).split(" ").strip(), "%Y-%m-%d").date()
         except:
