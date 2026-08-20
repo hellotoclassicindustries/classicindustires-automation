@@ -34,41 +34,56 @@ if raw_data:
     # 1. Initialize data registries for clean partwise grouping arrays
     part_timeline_logs = []
     sample_assets = {}
+    bulk_production_parts = set() # Tracks parts that have a history of bulk production runs
 
-    # 2. Unified Pass: Process transaction blocks and completely isolate ONLY samples
+    # PASS 1: Build a master index of all parts that have had commercial bulk runs
+    for row in raw_data:
+        part = str(row["part_number"]).strip().upper()
+        qty = int(row["qty_nos"])
+        if qty > 5: # If the part has ever arrived in a quantity greater than 5, it is classified as a commercial product
+            bulk_production_parts.add(part)
+
+    # PASS 2: Process transaction blocks and accurately isolate true samples
     for row in raw_data:
         part = str(row["part_number"]).strip().upper()
         desc = str(row["description"]).strip().upper()
         qty = int(row["qty_nos"])
         remarks = str(row["remarks_notes"]).strip().upper()
+        entry_type = row["entry_type"].strip().lower()
         
-        # Parse transaction date securely for timeline segmentation checks
-        try:
-            row_date = datetime.strptime(row["date"], "%Y-%m-%d").date()
-        except:
-            row_date = date.today()
-            
-        # 🔬 PURE SAMPLE ISOLATION TRACK GATE: Only filters "SAMPLE". PTO stays as a valid part asset!
-        if "SAMPLE" in remarks or "SAMPLE" in part or "SAMPLE" in desc:
-            lot_id = row["challan_no"].strip().upper() if row["entry_type"].strip().lower() == "inward" else "RETAINED"
+        # 🔬 HARDENED TWO-WAY SAMPLE IDENTIFICATION ENGNE:
+        # Check A: Does the text notes explicitly state "SAMPLE"?
+        # Check B: Is it an INWARD shipment of exactly 1 piece AND has no history of bulk production?
+        is_explicit_sample = ("SAMPLE" in remarks or "SAMPLE" in part or "SAMPLE" in desc)
+        is_single_piece_prototype = (entry_type == "inward" and qty == 1 and part not in bulk_production_parts)
+        
+        if is_explicit_sample or is_single_piece_prototype:
+            lot_id = row["challan_no"].strip().upper() if entry_type == "inward" else "RETAINED"
             if part not in sample_assets:
                 sample_assets[part] = {"description": desc, "qty": 0, "challans": set()}
             sample_assets[part]["qty"] += qty
             sample_assets[part]["challans"].add(lot_id)
-            continue
+            continue # Isolates verified samples from active production stock immediately
             
-        # Log all valid items (including PTO parts) into a clean, flat transaction array list
+        # Log all valid production items (including multi-piece PTO parts and leftover individual items)
+        try:
+            row_date = datetime.strptime(str(row["date"]).split(" ").strip(), "%Y-%m-%d").date()
+        except:
+            row_date = date.today()
+
         part_timeline_logs.append({
             "Date": row_date,
             "Part Number": part,
             "Item Description": desc,
-            "Type": row["entry_type"].strip().lower(),
+            "Type": entry_type,
             "Quantity": qty
         })
         
     df_timeline = pd.DataFrame(part_timeline_logs)
+
     # 🎛️ CENTRAL EMBEDDED FILTER PANEL (DEFAULTED TO LAST 1 WEEK WINDOW)
     st.subheader("🔍 Master Performance Tally Query Panel")
+    st.markdown("_Select your options below to filter all inventory metrics, grids, and chart displays collectively:_")
     
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
@@ -78,7 +93,7 @@ if raw_data:
         unique_descs = sorted(df_timeline["Item Description"].unique().tolist()) if not df_timeline.empty else []
         selected_descs = st.multiselect("⚙️ Filter by Component Descriptions:", options=unique_descs, placeholder="All Descriptions")
     with f_col3:
-        # 🗓️ TIMELINE DEFAULT LOCK: Evaluates current date and locks the past 7 days automatically
+        # TIMELINE DEFAULT LOCK: Evaluates current date and locks the past 7 days automatically
         current_run_date = date.today()
         default_start_date = current_run_date - timedelta(days=7)
         selected_date_range = st.date_input("📆 Select Transaction Evaluation Window:", [default_start_date, current_run_date])
@@ -95,7 +110,7 @@ if raw_data:
         start_date, end_date = selected_date_range
         df_filtered = df_filtered[(df_filtered["Date"] >= start_date) & (df_filtered["Date"] <= end_date)]
 
-    # 🧮 EXECUTE PARTWISE RUNNING TALLY AGGREGATIONS (ELIMINATES INCONSISTENT LOT LOOPS)
+    # 🧮 EXECUTE PARTWISE RUNNING TALLY AGGREGATIONS
     part_summary_map = {}
     for _, row in df_filtered.iterrows():
         p_num = row["Part Number"]
@@ -146,7 +161,6 @@ if raw_data:
     st.markdown("---")
     st.subheader("📊 Partwise Stock Fulfillment Levels (Shipped vs Remaining Balance)")
     if not df_chart.empty:
-        # Pivot by Part Identity to ensure perfect stacked color groupings across the screen width
         chart_pivot = df_chart.pivot(index="Part Identity", columns="Allocation Segment", values="Pieces Count").fillna(0)
         st.bar_chart(
             data=chart_pivot, 
