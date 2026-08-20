@@ -175,25 +175,25 @@ if raw_data:
     df_chart_filtered = df_chart_raw.copy()
     df_lots_filtered = df_lots_raw.copy()
 
-    # Apply part filters globally to all sections
+    # Apply part filters globally
     if selected_parts:
         if not df_global_filtered.empty: df_global_filtered = df_global_filtered[df_global_filtered["Part Number"].isin(selected_parts)]
         if not df_samples_filtered.empty: df_samples_filtered = df_samples_filtered[df_samples_filtered["Part Number"].isin(selected_parts)]
         df_chart_filtered = df_chart_filtered[df_chart_filtered["Part Number"].isin(selected_parts)]
         df_lots_filtered = df_lots_filtered[df_lots_filtered["Part Number"].isin(selected_parts)]
         
-    # Apply text description filters globally to all sections
+    # Apply text description filters globally
     if selected_descs:
         if not df_global_filtered.empty: df_global_filtered = df_global_filtered[df_global_filtered["Item Description"].isin(selected_descs)]
         if not df_samples_filtered.empty: df_samples_filtered = df_samples_filtered[df_samples_filtered["Item Description"].isin(selected_descs)]
         df_chart_filtered = df_chart_filtered[df_chart_filtered["Item Description"].isin(selected_descs)]
         df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
 
-    # Apply date filters globally to all sections
-    if isinstance(selected_date_range, list) or isinstance(selected_date_range, tuple):
-        if len(selected_date_range) == 2:
-            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= selected_date_range) & (df_lots_filtered["Date"] <= selected_date_range)]
-            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= selected_date_range) & (df_chart_filtered["Date"] <= selected_date_range)]
+    # 💡 CRITICAL PROTECTION PATCH: Verify date tuple contains exactly two elements before slicing!
+    if isinstance(selected_date_range, (list, tuple)) and len(selected_date_range) == 2:
+        start_date, end_date = selected_date_range
+        df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= start_date) & (df_lots_filtered["Date"] <= end_date)]
+        df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= start_date) & (df_chart_filtered["Date"] <= end_date)]
 
     # 📋 OUTPUT PANEL 1: Global Summary
     st.markdown("---")
