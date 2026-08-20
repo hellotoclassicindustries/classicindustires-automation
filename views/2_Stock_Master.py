@@ -143,55 +143,12 @@ if raw_data:
     df_lots_raw = pd.DataFrame(lot_rows)
     df_chart_raw = pd.DataFrame(chart_rows)
 
-    # 🌐 SIDEBAR PANEL INTERACTIVE CONTROL FILTERS MATRIX
-    st.sidebar.header("🔍 Control & Filter Filters")
-    st.sidebar.markdown("---")
-    
-    # Filter 1: Timeline Date Window Selector
-    all_dates = df_lots_raw["Date"].tolist() if not df_lots_raw.empty else [date.today()]
-    min_date, max_date = min(all_dates), max(all_dates)
-    selected_date_range = st.sidebar.date_input("📆 Filter Ledger by Date Range:", [min_date, max_date], min_value=min_date, max_value=max_date)
-    
-    # Filter 2: Part Number Dropdown Matrix Multi-Selector
-    unique_parts = sorted(df_lots_raw["Part Number"].unique().tolist()) if not df_lots_raw.empty else []
-    selected_parts = st.sidebar.multiselect("🔢 Select Specific Part Numbers:", options=unique_parts, placeholder="All Active SKUs Running")
-    
-    # Filter 3: Component Description Dropdown Matrix Multi-Selector
-    unique_descs = sorted(df_lots_raw["Item Description"].unique().tolist()) if not df_lots_raw.empty else []
-    selected_descs = st.sidebar.multiselect("⚙️ Select Component Descriptions:", options=unique_descs, placeholder="All Factory Descriptions Running")
-
-    # ⚡ APPLY INTERACTIVE FILTERS TO DATASET PAYLOADS
-    df_lots_filtered = df_lots_raw.copy()
-    df_chart_filtered = df_chart_raw.copy()
-
-    if isinstance(selected_date_range, list) or isinstance(selected_date_range, tuple):
-        if len(selected_date_range) == 2:
-            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= selected_date_range[0]) & (df_lots_filtered["Date"] <= selected_date_range[1])]
-            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= selected_date_range[0]) & (df_chart_filtered["Date"] <= selected_date_range[1])]
-
-    if selected_parts:
-        df_lots_filtered = df_lots_filtered[df_lots_filtered["Part Number"].isin(selected_parts)]
-        df_chart_filtered = df_chart_filtered[df_chart_filtered["Part Number"].isin(selected_parts)]
-        
-    if selected_descs:
-        df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
-        df_chart_filtered = df_chart_filtered[df_chart_filtered["Item Description"].isin(selected_descs)]
-
-    # DISPLAY VIEWPANEL SECTION 1: Consolidated Totals Table
+    # 📋 DISPLAY VIEWPANEL SECTION 1: Consolidated Global Production Table
     st.subheader("📋 Consolidated Global Production Part Balances")
-    if not df_global_raw.empty:
-        df_global_filtered = df_global_raw.copy()
-        if selected_parts:
-            df_global_filtered = df_global_filtered[df_global_filtered["Part Number"].isin(selected_parts)]
-        if selected_descs:
-            df_global_filtered = df_global_filtered[df_global_filtered["Item Description"].isin(selected_descs)]
-        st.dataframe(df_global_filtered, use_container_width=True)
-    else:
-        st.info("No active production balances logged in the system.")
-    
+    st.dataframe(df_global_raw, use_container_width=True)
     st.markdown("---")
     
-    # DISPLAY VIEWPANEL SECTION 2: Samples Retained Assets Register
+    # 🔬 DISPLAY VIEWPANEL SECTION 2: Samples Retained Assets Register
     st.subheader("🔬 Permanent Reference Sample Collection (Retained Assets)")
     sample_rows = []
     for part, details in sample_assets.items():
@@ -202,19 +159,50 @@ if raw_data:
             "Origin Challan References": ", ".join(list(details["challans"]))
         })
     if sample_rows:
-        df_samples = pd.DataFrame(sample_rows)
-        if selected_parts:
-            df_samples = df_samples[df_samples["Part Number"].isin(selected_parts)]
-        if selected_descs:
-            df_samples = df_samples[df_samples["Item Description"].isin(selected_descs)]
-        st.dataframe(df_samples, use_container_width=True)
+        st.dataframe(pd.DataFrame(sample_rows), use_container_width=True)
     else:
         st.info("No permanent sample tokens are currently logged in the facility archives.")
         
     st.markdown("---")
     
-    # DISPLAY VIEWPANEL SECTION 3: Dynamic Filtered Allocation Chart (Full Screen Width)
-    st.subheader("📊 Lot Stock Allocation Levels (Delivered vs Remaining)")
+    # 🔍 MAIN SCREEN EMBEDDED GRAPH CONTROL FILTERS INTERFACE
+    st.subheader("📊 Lot Stock Allocation Chart Analysis")
+    st.markdown("_Use the drop-downs below to instantly filter and isolate specific material parts inside the graph display:_")
+    
+    # Render three column grid filters across the center of your page view
+    f_col1, f_col2, f_col3 = st.columns(3)
+    
+    with f_col1:
+        unique_parts = sorted(df_lots_raw["Part Number"].unique().tolist()) if not df_lots_raw.empty else []
+        selected_parts = st.multiselect("🔢 Filter by Part Numbers:", options=unique_parts, placeholder="All Active SKUs")
+        
+    with f_col2:
+        unique_descs = sorted(df_lots_raw["Item Description"].unique().tolist()) if not df_lots_raw.empty else []
+        selected_descs = st.multiselect("⚙️ Filter by Item Descriptions:", options=unique_descs, placeholder="All Descriptions")
+        
+    with f_col3:
+        all_dates = df_lots_raw["Date"].tolist() if not df_lots_raw.empty else [date.today()]
+        min_date, max_date = min(all_dates), max(all_dates)
+        selected_date_range = st.date_input("📆 Filter by Transaction Dates:", [min_date, max_date], min_value=min_date, max_value=max_date)
+
+    # ⚡ APPLY INTERACTIVE FILTERS TO DATASET PAYLOADS
+    df_lots_filtered = df_lots_raw.copy()
+    df_chart_filtered = df_chart_raw.copy()
+
+    if selected_parts:
+        df_lots_filtered = df_lots_filtered[df_lots_filtered["Part Number"].isin(selected_parts)]
+        df_chart_filtered = df_chart_filtered[df_chart_filtered["Part Number"].isin(selected_parts)]
+        
+    if selected_descs:
+        df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
+        df_chart_filtered = df_chart_filtered[df_chart_filtered["Item Description"].isin(selected_descs)]
+
+    if isinstance(selected_date_range, list) or isinstance(selected_date_range, tuple):
+        if len(selected_date_range) == 2:
+            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= selected_date_range[0]) & (df_lots_filtered["Date"] <= selected_date_range[1])]
+            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= selected_date_range[0]) & (df_chart_filtered["Date"] <= selected_date_range[1])]
+
+    # 🚀 RENDER FILTERED FULL-WIDTH VISUAL CHART
     if not df_chart_filtered.empty:
         chart_pivot = df_chart_filtered.pivot(index="Lot Reference", columns="Metric Type", values="Quantity").fillna(0)
         st.bar_chart(
@@ -224,7 +212,7 @@ if raw_data:
             height=380
         )
     else:
-        st.info("No allocation entries match the criteria selected in the sidebar.")
+        st.info("No active production transaction logs match your chosen filter criteria.")
         
     st.markdown("---")
     
