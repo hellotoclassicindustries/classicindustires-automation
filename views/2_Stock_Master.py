@@ -35,28 +35,31 @@ if raw_data:
     part_timeline_logs = []
     sample_assets = {}
 
-    # 2. Unified Pass: Process transaction blocks and completely isolate samples based STRICTLY on text notes
+    # 2. Unified Pass: Process transaction blocks and isolate samples based STRICTLY on Type=Inward & Qty=1
     for row in raw_data:
         part = str(row["part_number"]).strip().upper()
         desc = str(row["description"]).strip().upper()
         qty = int(row["qty_nos"])
-        remarks = str(row["remarks_notes"]).strip().upper()
         entry_type = row["entry_type"].strip().lower()
         
-        # 🔬 STRICT TEXT REMARKS GATING RULE:
-        # Relies 100% on the explicit written label "SAMPLE" inside your remarks/notes context.
-        # Quantity loops are completely ignored here to ensure structural accuracy across historical logs.
-        is_sample = ("SAMPLE" in remarks or "SAMPLE" in part or "SAMPLE" in desc)
+        # 🔬 STRICTOR OPERATIONAL ASSET RULE GATES:
+        # Must be an incoming delivery ('inward') AND track exactly 1 piece [ST9].
+        is_strict_sample = (entry_type == "inward" and qty == 1)
         
-        if is_sample:
-            lot_id = row["challan_no"].strip().upper() if entry_type == "inward" else "RETAINED"
-            if part not in sample_assets:
-                sample_assets[part] = {"description": desc, "qty": 0, "challans": set()}
-            sample_assets[part]["qty"] += qty
-            sample_assets[part]["challans"].add(lot_id)
+        if is_strict_sample:
+            part_upper = part.upper()
+            lot_id = row["challan_no"].strip().upper()
+            
+            # 💡 SPECIFIC PRESENTATION REQUIREMENT: Appends '-SAMPLE' directly to the item description string [ST9]
+            modified_sample_desc = f"{desc}-SAMPLE"
+            
+            if part_upper not in sample_assets:
+                sample_assets[part_upper] = {"description": modified_sample_desc, "qty": 0, "challans": set()}
+            sample_assets[part_upper]["qty"] += qty
+            sample_assets[part_upper]["challans"].add(lot_id)
             continue # Isolates verified samples from active production stock immediately
             
-        # Log all valid items (including PTO parts and single pieces) into production tracks
+        # Log valid commercial item logs into regular timeline tracks
         try:
             row_date = datetime.strptime(str(row["date"]).split(" ").strip(), "%Y-%m-%d").date()
         except:
@@ -72,7 +75,7 @@ if raw_data:
         
     df_timeline = pd.DataFrame(part_timeline_logs)
 
-    # 🎛️ CENTRAL EMBEDDED FILTER PANEL (DEFAULTED TO LAST 1 WEEK WINDOW)
+    # 🎛️ CENTRAL MASTER CONTROL PANEL (EMBEDDED FILTERS TOP LAYER)
     st.subheader("🔍 Master Performance Tally Query Panel")
     st.markdown("_Select your options below to filter all inventory metrics, grids, and chart displays collectively:_")
     
@@ -84,12 +87,11 @@ if raw_data:
         unique_descs = sorted(df_timeline["Item Description"].unique().tolist()) if not df_timeline.empty else []
         selected_descs = st.multiselect("⚙️ Filter by Component Descriptions:", options=unique_descs, placeholder="All Descriptions")
     with f_col3:
-        # TIMELINE DEFAULT LOCK: Evaluates current date and locks the past 7 days automatically
         current_run_date = date.today()
         default_start_date = current_run_date - timedelta(days=7)
         selected_date_range = st.date_input("📆 Select Transaction Evaluation Window:", [default_start_date, current_run_date])
 
-    # ⚡ APPLY SELECTIONS TO HIGH-VOLUME RUNNING FRAMES
+    # ⚡ APPLICATION ENGINE FOR UNIFIED DATA FILTERING
     df_filtered = df_timeline.copy()
 
     if selected_parts:
@@ -117,7 +119,7 @@ if raw_data:
         elif p_type == "outward":
             part_summary_map[p_num]["outward"] += p_qty
 
-    # Formulate clean presentation dataframes for full-width grid plotting
+    # Formulate presentation DataFrames
     part_matrix_rows = []
     chart_rows = []
     
@@ -133,7 +135,6 @@ if raw_data:
             "Net Available WIP Balance": display_wip
         })
         
-        # Log clean metrics parameters to populate the double-colored stacked bar graph
         chart_rows.append({"Part Identity": part, "Allocation Segment": "Shipped Outward (Nos)", "Pieces Count": details["outward"]})
         chart_rows.append({"Part Identity": part, "Allocation Segment": "Remaining WIP Stock (Nos)", "Pieces Count": display_wip})
 
@@ -148,14 +149,14 @@ if raw_data:
     else:
         st.info("No active production materials match your selected filter timeline metrics.")
 
-    # 📊 SECTION 2: Full-Width Stacked Allocation Chart (Part Identity Base)
+    # 📊 SECTION 2: Full-Width Stacked Allocation Chart
     st.markdown("---")
     st.subheader("📊 Partwise Stock Fulfillment Levels (Shipped vs Remaining Balance)")
     if not df_chart.empty:
         chart_pivot = df_chart.pivot(index="Part Identity", columns="Allocation Segment", values="Pieces Count").fillna(0)
         st.bar_chart(
             data=chart_pivot, 
-            color=["#0068c9", "#29b573"], # Blueprint Blue = Shipped Outward | Clean Green = Remaining WIP Stock
+            color=["#0068c9", "#29b573"], 
             use_container_width=True, 
             height=400
         )
@@ -169,7 +170,7 @@ if raw_data:
     for part, details in sample_assets.items():
         sample_display_rows.append({
             "Part Number": part,
-            "Item Description": details["description"],
+            "Item Description": details["description"], # Displays as 'DESCRIPTION-SAMPLE' [ST9]
             "Total Pieces Retained (Nos)": details["qty"],
             "Origin Inward Challans": ", ".join(list(details["challans"]))
         })
@@ -179,6 +180,6 @@ if raw_data:
             df_samples = df_samples[df_samples["Part Number"].isin(selected_parts)]
         st.dataframe(df_samples, use_container_width=True)
     else:
-        st.info("No permanent reference samples are currently logged in the facility archives.")
+        st.info("No permanent reference samples match your selection criteria.")
 else:
     st.info("No validated transaction entries are currently available to compute stock numbers.")
