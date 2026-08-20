@@ -101,7 +101,7 @@ if raw_data:
                     if overflow_key not in lot_stock:
                         lot_stock[overflow_key] = {"description": row["description"].strip().upper(), "inward": 0, "outward": 0, "date": row["date"]}
                     lot_stock[overflow_key]["outward"] += allocated_qty
-    # Formulate Structured Raw Dataframe Arrays
+        # Formulate Structured Raw Dataframe Arrays
     global_rows = []
     for part, details in global_stock.items():
         net_bal = details["inward"] - details["outward"]
@@ -120,9 +120,15 @@ if raw_data:
         net_lot_bal = details["inward"] - details["outward"]
         display_bal = max(0, net_lot_bal)
         
+        # 💡 FIXED: Enforces strict string-to-date object parsing for the table matrix rows
         try:
-            row_date = datetime.strptime(details["date"], "%Y-%m-%d").date()
-        except:
+            if isinstance(details["date"], str):
+                row_date = datetime.strptime(details["date"].split(" ")[0].strip(), "%Y-%m-%d").date()
+            elif isinstance(details["date"], (datetime, date)):
+                row_date = details["date"]
+            else:
+                row_date = date.today()
+        except Exception as date_err:
             row_date = date.today()
             
         lot_rows.append({
@@ -189,11 +195,13 @@ if raw_data:
         df_chart_filtered = df_chart_filtered[df_chart_filtered["Item Description"].isin(selected_descs)]
         df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
 
-    # 💡 CRITICAL PROTECTION PATCH: Verify date tuple contains exactly two elements before slicing!
+    # 💡 SAFE DATETIME PARSING FILTER FOR UNIVERSAL SYNCHRONIZATION
     if isinstance(selected_date_range, (list, tuple)) and len(selected_date_range) == 2:
         start_date, end_date = selected_date_range
-        df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= start_date) & (df_lots_filtered["Date"] <= end_date)]
-        df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= start_date) & (df_chart_filtered["Date"] <= end_date)]
+        if not df_lots_filtered.empty:
+            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= start_date) & (df_lots_filtered["Date"] <= end_date)]
+        if not df_chart_filtered.empty:
+            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= start_date) & (df_chart_filtered["Date"] <= end_date)]
 
     # 📋 OUTPUT PANEL 1: Global Summary
     st.markdown("---")
@@ -211,7 +219,7 @@ if raw_data:
     else:
         st.info("No reference sample tokens match your selected filter criteria.")
         
-    # 📊 OUTPUT PANEL 3: Dynamic Visual Graph (Filtered Universally)
+    # 📊 OUTPUT PANEL 3: Dynamic Visual Graph
     st.markdown("---")
     st.subheader("📊 Lot Stock Allocation Levels (Delivered vs Remaining)")
     if not df_chart_filtered.empty:
@@ -220,7 +228,7 @@ if raw_data:
     else:
         st.info("No graphical bars match your selected filter criteria.")
         
-    # 🔍 OUTPUT PANEL 4: Granular Material Ledger (Filtered Universally)
+    # 🔍 OUTPUT PANEL 4: Granular Material Ledger Matrix
     st.markdown("---")
     st.subheader("🔍 Lot-by-Lot Traceability Breakdown Matrix Ledger")
     if not df_lots_filtered.empty:
