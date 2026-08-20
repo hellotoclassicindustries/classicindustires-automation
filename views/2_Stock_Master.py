@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # Initialize Secure Supabase Target Connections
 url: str = st.secrets["SUPABASE_URL"]
@@ -25,216 +25,155 @@ def fetch_raw_ledger_payload():
 
 # Set up Dashboard Grid Presentation Layout
 st.set_page_config(page_title="ClassicIndustries | Stock Master", layout="wide")
-st.title("📦 Live Work-In-Progress (WIP) Stock Master Dashboard")
+st.title("📦 Partwise WIP Balance & Fulfillment Dashboard")
 st.markdown("---")
 
 raw_data = fetch_raw_ledger_payload()
 
 if raw_data:
-    global_stock = {}     # Tracks running balances per production SKU
-    lot_stock = {}        # Tracks batch-level details chronologically
-    sample_assets = {}    # Maps Part Number -> Total Permanent Reference Collection Items
-    inward_sequence = []  # Tracks arrival timeline for FIFO sorting
+    # 1. Initialize data registries for clean partwise grouping arrays
+    part_timeline_logs = []
+    sample_assets = {}
 
-    # PASS 1: Log all Inward deliveries chronologically and separate active stock from permanent samples
+    # 2. Unified Pass: Process transaction blocks and completely isolate ONLY samples
     for row in raw_data:
         part = str(row["part_number"]).strip().upper()
         desc = str(row["description"]).strip().upper()
         qty = int(row["qty_nos"])
         remarks = str(row["remarks_notes"]).strip().upper()
         
-        if row["entry_type"].strip().lower() == "inward":
-            lot_id = row["challan_no"].strip().upper()
-            
-            # 🔬 PERMANENT REFERENCE ASSET ISOLATION TRACK GATE
-            if "SAMPLE" in remarks or "PTO" in remarks:
-                if part not in sample_assets:
-                    sample_assets[part] = {"description": desc, "qty": 0, "challans": set()}
-                sample_assets[part]["qty"] += qty
-                sample_assets[part]["challans"].add(lot_id)
-                continue 
-                
-            # Regular Production Material Routing Tracks
-            if part not in global_stock:
-                global_stock[part] = {"description": desc, "inward": 0, "outward": 0}
-            global_stock[part]["inward"] += qty
-            
-            lot_key = (part, lot_id)
-            if lot_key not in lot_stock:
-                lot_stock[lot_key] = {"description": desc, "inward": 0, "outward": 0, "date": row["date"]}
-                inward_sequence.append(lot_key)
-            lot_stock[lot_key]["inward"] += qty
-
-    # PASS 2: Deduct outward dispatches (Production material allocation only)
-    for row in raw_data:
-        if row["entry_type"].strip().lower() == "outward":
-            part = str(row["part_number"]).strip().upper()
-            qty = int(row["qty_nos"])
-            ref_lot_str = row["ref_challan_no"].strip().upper()
-            
-            if part in global_stock:
-                global_stock[part]["outward"] += qty
-                
-            allocated_qty = qty
-            
-            if ref_lot_str not in ["NO-REF", "SELF", "NONE"] and "&" not in ref_lot_str:
-                lot_key = (part, ref_lot_str)
-                if lot_key in lot_stock:
-                    lot_stock[lot_key]["outward"] += allocated_qty
-                    allocated_qty = 0
-            
-            if allocated_qty > 0:
-                for lot_key in inward_sequence:
-                    if lot_key == part:
-                        available_in_batch = lot_stock[lot_key]["inward"] - lot_stock[lot_key]["outward"]
-                        
-                        if available_in_batch >= allocated_qty:
-                            lot_stock[lot_key]["outward"] += allocated_qty
-                            allocated_qty = 0
-                            break
-                        elif available_in_batch > 0:
-                            lot_stock[lot_key]["outward"] += available_in_batch
-                            allocated_qty -= available_in_batch
-                
-                if allocated_qty > 0:
-                    overflow_key = (part, "UNASSIGNED OVERFLOW")
-                    if overflow_key not in lot_stock:
-                        lot_stock[overflow_key] = {"description": row["description"].strip().upper(), "inward": 0, "outward": 0, "date": row["date"]}
-                    lot_stock[overflow_key]["outward"] += allocated_qty
-        # Formulate Structured Raw Dataframe Arrays
-    global_rows = []
-    for part, details in global_stock.items():
-        net_bal = details["inward"] - details["outward"]
-        global_rows.append({
-            "Part Number": part,
-            "Item Description": details["description"],
-            "Total Inward Received (Nos)": details["inward"],
-            "Total Outward Shipped (Nos)": details["outward"],
-            "Net Available Stock (Nos)": max(0, net_bal)
-        })
-    df_global_raw = pd.DataFrame(global_rows)
-
-    lot_rows = []
-    chart_rows = []
-    for (part, lot_id), details in lot_stock.items():
-        net_lot_bal = details["inward"] - details["outward"]
-        display_bal = max(0, net_lot_bal)
-        
-        # 💡 FIXED: Enforces strict string-to-date object parsing for the table matrix rows
+        # Parse transaction date securely for timeline segmentation checks
         try:
-            if isinstance(details["date"], str):
-                row_date = datetime.strptime(details["date"].split(" ")[0].strip(), "%Y-%m-%d").date()
-            elif isinstance(details["date"], (datetime, date)):
-                row_date = details["date"]
-            else:
-                row_date = date.today()
-        except Exception as date_err:
+            row_date = datetime.strptime(row["date"], "%Y-%m-%d").date()
+        except:
             row_date = date.today()
             
-        lot_rows.append({
+        # 🔬 PURE SAMPLE ISOLATION TRACK GATE: Only filters "SAMPLE". PTO stays as a valid part asset!
+        if "SAMPLE" in remarks or "SAMPLE" in part or "SAMPLE" in desc:
+            lot_id = row["challan_no"].strip().upper() if row["entry_type"].strip().lower() == "inward" else "RETAINED"
+            if part not in sample_assets:
+                sample_assets[part] = {"description": desc, "qty": 0, "challans": set()}
+            sample_assets[part]["qty"] += qty
+            sample_assets[part]["challans"].add(lot_id)
+            continue
+            
+        # Log all valid items (including PTO parts) into a clean, flat transaction array list
+        part_timeline_logs.append({
             "Date": row_date,
             "Part Number": part,
-            "Inward Lot Identity/Challan": lot_id,
-            "Item Description": details["description"],
-            "Original Inward (Nos)": details["inward"],
-            "Delivered Outward (Nos)": details["outward"],
-            "Lot Remaining WIP Balance": display_bal
+            "Item Description": desc,
+            "Type": row["entry_type"].strip().lower(),
+            "Quantity": qty
         })
         
-        if details["inward"] > 0 or details["outward"] > 0:
-            lot_label = f"{part} (Lot: {lot_id})"
-            chart_rows.append({"Date": row_date, "Part Number": part, "Item Description": details["description"], "Lot Reference": lot_label, "Metric Type": "Delivered Shipped (Nos)", "Quantity": details["outward"]})
-            chart_rows.append({"Date": row_date, "Part Number": part, "Item Description": details["description"], "Lot Reference": lot_label, "Metric Type": "Remaining WIP Stock (Nos)", "Quantity": display_bal})
-            
-    df_lots_raw = pd.DataFrame(lot_rows)
-    df_chart_raw = pd.DataFrame(chart_rows)
-
-    sample_rows = []
-    for part, details in sample_assets.items():
-        sample_rows.append({
-            "Part Number": part,
-            "Item Description": details["description"],
-            "Total Pieces Retained (Nos)": details["qty"],
-            "Origin Challan References": ", ".join(list(details["challans"]))
-        })
-    df_samples_raw = pd.DataFrame(sample_rows)
-
-    # 🎛️ CENTRAL MASTER CONTROL PANEL (ONE FILTER SYSTEM TARGETING ALL SECTIONS)
-    st.subheader("🔍 Master Inventory Query & Filter Panel")
-    st.markdown("_Select your criteria here to filter ALL tables, charts, and matrices at once:_")
+    df_timeline = pd.DataFrame(part_timeline_logs)
+    # 🎛️ CENTRAL EMBEDDED FILTER PANEL (DEFAULTED TO LAST 1 WEEK WINDOW)
+    st.subheader("🔍 Master Performance Tally Query Panel")
     
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
-        unique_parts = sorted(df_lots_raw["Part Number"].unique().tolist()) if not df_lots_raw.empty else []
-        selected_parts = st.multiselect("🔢 Select Target Part Numbers:", options=unique_parts, placeholder="All Active SKUs")
+        unique_parts = sorted(df_timeline["Part Number"].unique().tolist()) if not df_timeline.empty else []
+        selected_parts = st.multiselect("🔢 Filter by Specific Part Numbers:", options=unique_parts, placeholder="All Active SKUs")
     with f_col2:
-        unique_descs = sorted(df_lots_raw["Item Description"].unique().tolist()) if not df_lots_raw.empty else []
-        selected_descs = st.multiselect("⚙️ Select Component Descriptions:", options=unique_descs, placeholder="All Descriptions")
+        unique_descs = sorted(df_timeline["Item Description"].unique().tolist()) if not df_timeline.empty else []
+        selected_descs = st.multiselect("⚙️ Filter by Component Descriptions:", options=unique_descs, placeholder="All Descriptions")
     with f_col3:
-        all_dates = df_lots_raw["Date"].tolist() if not df_lots_raw.empty else [date.today()]
-        min_date, max_date = min(all_dates), max(all_dates)
-        selected_date_range = st.date_input("📆 Filter by Transaction Timeline:", [min_date, max_date], min_value=min_date, max_value=max_date)
+        # 🗓️ TIMELINE DEFAULT LOCK: Evaluates current date and locks the past 7 days automatically
+        current_run_date = date.today()
+        default_start_date = current_run_date - timedelta(days=7)
+        selected_date_range = st.date_input("📆 Select Transaction Evaluation Window:", [default_start_date, current_run_date])
 
-    # ⚡ APPLICATION ENGINE FOR UNIFIED DATA FILTERING
-    df_global_filtered = df_global_raw.copy()
-    df_samples_filtered = df_samples_raw.copy()
-    df_chart_filtered = df_chart_raw.copy()
-    df_lots_filtered = df_lots_raw.copy()
+    # ⚡ APPLY SELECTIONS TO HIGH-VOLUME RUNNING FRAMES
+    df_filtered = df_timeline.copy()
 
-    # Apply part filters globally
     if selected_parts:
-        if not df_global_filtered.empty: df_global_filtered = df_global_filtered[df_global_filtered["Part Number"].isin(selected_parts)]
-        if not df_samples_filtered.empty: df_samples_filtered = df_samples_filtered[df_samples_filtered["Part Number"].isin(selected_parts)]
-        df_chart_filtered = df_chart_filtered[df_chart_filtered["Part Number"].isin(selected_parts)]
-        df_lots_filtered = df_lots_filtered[df_lots_filtered["Part Number"].isin(selected_parts)]
-        
-    # Apply text description filters globally
+        df_filtered = df_filtered[df_filtered["Part Number"].isin(selected_parts)]
     if selected_descs:
-        if not df_global_filtered.empty: df_global_filtered = df_global_filtered[df_global_filtered["Item Description"].isin(selected_descs)]
-        if not df_samples_filtered.empty: df_samples_filtered = df_samples_filtered[df_samples_filtered["Item Description"].isin(selected_descs)]
-        df_chart_filtered = df_chart_filtered[df_chart_filtered["Item Description"].isin(selected_descs)]
-        df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
-
-    # 💡 SAFE DATETIME PARSING FILTER FOR UNIVERSAL SYNCHRONIZATION
+        df_filtered = df_filtered[df_filtered["Item Description"].isin(selected_descs)]
+        
     if isinstance(selected_date_range, (list, tuple)) and len(selected_date_range) == 2:
         start_date, end_date = selected_date_range
-        if not df_lots_filtered.empty:
-            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= start_date) & (df_lots_filtered["Date"] <= end_date)]
-        if not df_chart_filtered.empty:
-            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= start_date) & (df_chart_filtered["Date"] <= end_date)]
+        df_filtered = df_filtered[(df_filtered["Date"] >= start_date) & (df_filtered["Date"] <= end_date)]
 
-    # 📋 OUTPUT PANEL 1: Global Summary
-    st.markdown("---")
-    st.subheader("📋 Consolidated Global Production Part Balances")
-    if not df_global_filtered.empty:
-        st.dataframe(df_global_filtered, use_container_width=True)
-    else:
-        st.info("No global summary matches your selected filter criteria.")
+    # 🧮 EXECUTE PARTWISE RUNNING TALLY AGGREGATIONS (ELIMINATES INCONSISTENT LOT LOOPS)
+    part_summary_map = {}
+    for _, row in df_filtered.iterrows():
+        p_num = row["Part Number"]
+        p_desc = row["Item Description"]
+        p_type = row["Type"]
+        p_qty = row["Quantity"]
+        
+        if p_num not in part_summary_map:
+            part_summary_map[p_num] = {"description": p_desc, "inward": 0, "outward": 0}
+            
+        if p_type == "inward":
+            part_summary_map[p_num]["inward"] += p_qty
+        elif p_type == "outward":
+            part_summary_map[p_num]["outward"] += p_qty
+
+    # Formulate clean presentation dataframes for full-width grid plotting
+    part_matrix_rows = []
+    chart_rows = []
     
-    # 🔬 OUTPUT PANEL 2: Permanent Reference Asset Register
+    for part, details in part_summary_map.items():
+        net_wip_bal = details["inward"] - details["outward"]
+        display_wip = max(0, net_wip_bal)
+        
+        part_matrix_rows.append({
+            "Part Number": part,
+            "Item Description": details["description"],
+            "Total Inward Received (Nos)": details["inward"],
+            "Total Shipped Outward (Nos)": details["outward"],
+            "Net Available WIP Balance": display_wip
+        })
+        
+        # Log clean metrics parameters to populate the double-colored stacked bar graph
+        chart_rows.append({"Part Identity": part, "Allocation Segment": "Shipped Outward (Nos)", "Pieces Count": details["outward"]})
+        chart_rows.append({"Part Identity": part, "Allocation Segment": "Remaining WIP Stock (Nos)", "Pieces Count": display_wip})
+
+    df_matrix = pd.DataFrame(part_matrix_rows)
+    df_chart = pd.DataFrame(chart_rows)
+
+    # 📋 SECTION 1: Aggregate Partwise Available Stocks Matrix Ledger
+    st.markdown("---")
+    st.subheader("📋 Consolidated Partwise Inventory Balance Ledger")
+    if not df_matrix.empty:
+        st.dataframe(df_matrix, use_container_width=True)
+    else:
+        st.info("No active production materials match your selected filter timeline metrics.")
+
+    # 📊 SECTION 2: Full-Width Stacked Allocation Chart (Part Identity Base)
+    st.markdown("---")
+    st.subheader("📊 Partwise Stock Fulfillment Levels (Shipped vs Remaining Balance)")
+    if not df_chart.empty:
+        # Pivot by Part Identity to ensure perfect stacked color groupings across the screen width
+        chart_pivot = df_chart.pivot(index="Part Identity", columns="Allocation Segment", values="Pieces Count").fillna(0)
+        st.bar_chart(
+            data=chart_pivot, 
+            color=["#0068c9", "#29b573"], # Blueprint Blue = Shipped Outward | Clean Green = Remaining WIP Stock
+            use_container_width=True, 
+            height=400
+        )
+    else:
+        st.info("No transaction tracking entries are available within this timeline to map visualization graphs.")
+
+    # 🔬 SECTION 3: Permanent Reference Sample Collection (Retained Assets Room)
     st.markdown("---")
     st.subheader("🔬 Permanent Reference Sample Collection (Retained Assets)")
-    if not df_samples_filtered.empty:
-        st.dataframe(df_samples_filtered, use_container_width=True)
+    sample_display_rows = []
+    for part, details in sample_assets.items():
+        sample_display_rows.append({
+            "Part Number": part,
+            "Item Description": details["description"],
+            "Total Pieces Retained (Nos)": details["qty"],
+            "Origin Inward Challans": ", ".join(list(details["challans"]))
+        })
+    if sample_display_rows:
+        df_samples = pd.DataFrame(sample_display_rows)
+        if selected_parts:
+            df_samples = df_samples[df_samples["Part Number"].isin(selected_parts)]
+        st.dataframe(df_samples, use_container_width=True)
     else:
-        st.info("No reference sample tokens match your selected filter criteria.")
-        
-    # 📊 OUTPUT PANEL 3: Dynamic Visual Graph
-    st.markdown("---")
-    st.subheader("📊 Lot Stock Allocation Levels (Delivered vs Remaining)")
-    if not df_chart_filtered.empty:
-        chart_pivot = df_chart_filtered.pivot(index="Lot Reference", columns="Metric Type", values="Quantity").fillna(0)
-        st.bar_chart(data=chart_pivot, color=["#0068c9", "#29b573"], use_container_width=True, height=380)
-    else:
-        st.info("No graphical bars match your selected filter criteria.")
-        
-    # 🔍 OUTPUT PANEL 4: Granular Material Ledger Matrix
-    st.markdown("---")
-    st.subheader("🔍 Lot-by-Lot Traceability Breakdown Matrix Ledger")
-    if not df_lots_filtered.empty:
-        st.dataframe(df_lots_filtered, use_container_width=True, height=400)
-    else:
-        st.info("No granular batch records match your selected filter criteria.")
-
+        st.info("No permanent reference samples are currently logged in the facility archives.")
 else:
     st.info("No validated transaction entries are currently available to compute stock numbers.")
