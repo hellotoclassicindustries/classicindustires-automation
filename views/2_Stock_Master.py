@@ -101,7 +101,7 @@ if raw_data:
                     if overflow_key not in lot_stock:
                         lot_stock[overflow_key] = {"description": row["description"].strip().upper(), "inward": 0, "outward": 0, "date": row["date"]}
                     lot_stock[overflow_key]["outward"] += allocated_qty
-    # Formulate Structured Data Matrix Framework rows
+    # Formulate Structured Raw Dataframe Arrays
     global_rows = []
     for part, details in global_stock.items():
         net_bal = details["inward"] - details["outward"]
@@ -128,7 +128,7 @@ if raw_data:
         lot_rows.append({
             "Date": row_date,
             "Part Number": part,
-            "Inward Lot Identity": lot_id,
+            "Inward Lot Identity/Challan": lot_id,
             "Item Description": details["description"],
             "Original Inward (Nos)": details["inward"],
             "Delivered Outward (Nos)": details["outward"],
@@ -143,13 +143,6 @@ if raw_data:
     df_lots_raw = pd.DataFrame(lot_rows)
     df_chart_raw = pd.DataFrame(chart_rows)
 
-    # 📋 DISPLAY VIEWPANEL SECTION 1: Consolidated Global Production Table
-    st.subheader("📋 Consolidated Global Production Part Balances")
-    st.dataframe(df_global_raw, use_container_width=True)
-    st.markdown("---")
-    
-    # 🔬 DISPLAY VIEWPANEL SECTION 2: Samples Retained Assets Register
-    st.subheader("🔬 Permanent Reference Sample Collection (Retained Assets)")
     sample_rows = []
     for part, details in sample_assets.items():
         sample_rows.append({
@@ -158,67 +151,82 @@ if raw_data:
             "Total Pieces Retained (Nos)": details["qty"],
             "Origin Challan References": ", ".join(list(details["challans"]))
         })
-    if sample_rows:
-        st.dataframe(pd.DataFrame(sample_rows), use_container_width=True)
-    else:
-        st.info("No permanent sample tokens are currently logged in the facility archives.")
-        
-    st.markdown("---")
+    df_samples_raw = pd.DataFrame(sample_rows)
+
+    # 🎛️ CENTRAL MASTER CONTROL PANEL (ONE FILTER SYSTEM TARGETING ALL SECTIONS)
+    st.subheader("🔍 Master Inventory Query & Filter Panel")
+    st.markdown("_Select your criteria here to filter ALL tables, charts, and matrices at once:_")
     
-    # 🔍 MAIN SCREEN EMBEDDED GRAPH CONTROL FILTERS INTERFACE
-    st.subheader("📊 Lot Stock Allocation Chart Analysis")
-    st.markdown("_Use the drop-downs below to instantly filter and isolate specific material parts inside the graph display:_")
-    
-    # Render three column grid filters across the center of your page view
     f_col1, f_col2, f_col3 = st.columns(3)
-    
     with f_col1:
         unique_parts = sorted(df_lots_raw["Part Number"].unique().tolist()) if not df_lots_raw.empty else []
-        selected_parts = st.multiselect("🔢 Filter by Part Numbers:", options=unique_parts, placeholder="All Active SKUs")
-        
+        selected_parts = st.multiselect("🔢 Select Target Part Numbers:", options=unique_parts, placeholder="All Active SKUs")
     with f_col2:
         unique_descs = sorted(df_lots_raw["Item Description"].unique().tolist()) if not df_lots_raw.empty else []
-        selected_descs = st.multiselect("⚙️ Filter by Item Descriptions:", options=unique_descs, placeholder="All Descriptions")
-        
+        selected_descs = st.multiselect("⚙️ Select Component Descriptions:", options=unique_descs, placeholder="All Descriptions")
     with f_col3:
         all_dates = df_lots_raw["Date"].tolist() if not df_lots_raw.empty else [date.today()]
         min_date, max_date = min(all_dates), max(all_dates)
-        selected_date_range = st.date_input("📆 Filter by Transaction Dates:", [min_date, max_date], min_value=min_date, max_value=max_date)
+        selected_date_range = st.date_input("📆 Filter by Transaction Timeline:", [min_date, max_date], min_value=min_date, max_value=max_date)
 
-    # ⚡ APPLY INTERACTIVE FILTERS TO DATASET PAYLOADS
-    df_lots_filtered = df_lots_raw.copy()
+    # ⚡ APPLICATION ENGINE FOR UNIFIED DATA FILTERING
+    df_global_filtered = df_global_raw.copy()
+    df_samples_filtered = df_samples_raw.copy()
     df_chart_filtered = df_chart_raw.copy()
+    df_lots_filtered = df_lots_raw.copy()
 
+    # Apply part filters globally to all sections
     if selected_parts:
-        df_lots_filtered = df_lots_filtered[df_lots_filtered["Part Number"].isin(selected_parts)]
+        if not df_global_filtered.empty: df_global_filtered = df_global_filtered[df_global_filtered["Part Number"].isin(selected_parts)]
+        if not df_samples_filtered.empty: df_samples_filtered = df_samples_filtered[df_samples_filtered["Part Number"].isin(selected_parts)]
         df_chart_filtered = df_chart_filtered[df_chart_filtered["Part Number"].isin(selected_parts)]
+        df_lots_filtered = df_lots_filtered[df_lots_filtered["Part Number"].isin(selected_parts)]
         
+    # Apply text description filters globally to all sections
     if selected_descs:
-        df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
+        if not df_global_filtered.empty: df_global_filtered = df_global_filtered[df_global_filtered["Item Description"].isin(selected_descs)]
+        if not df_samples_filtered.empty: df_samples_filtered = df_samples_filtered[df_samples_filtered["Item Description"].isin(selected_descs)]
         df_chart_filtered = df_chart_filtered[df_chart_filtered["Item Description"].isin(selected_descs)]
+        df_lots_filtered = df_lots_filtered[df_lots_filtered["Item Description"].isin(selected_descs)]
 
+    # Apply date filters globally to all sections
     if isinstance(selected_date_range, list) or isinstance(selected_date_range, tuple):
         if len(selected_date_range) == 2:
-            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= selected_date_range[0]) & (df_lots_filtered["Date"] <= selected_date_range[1])]
-            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= selected_date_range[0]) & (df_chart_filtered["Date"] <= selected_date_range[1])]
+            df_lots_filtered = df_lots_filtered[(df_lots_filtered["Date"] >= selected_date_range) & (df_lots_filtered["Date"] <= selected_date_range)]
+            df_chart_filtered = df_chart_filtered[(df_chart_filtered["Date"] >= selected_date_range) & (df_chart_filtered["Date"] <= selected_date_range)]
 
-    # 🚀 RENDER FILTERED FULL-WIDTH VISUAL CHART
+    # 📋 OUTPUT PANEL 1: Global Summary
+    st.markdown("---")
+    st.subheader("📋 Consolidated Global Production Part Balances")
+    if not df_global_filtered.empty:
+        st.dataframe(df_global_filtered, use_container_width=True)
+    else:
+        st.info("No global summary matches your selected filter criteria.")
+    
+    # 🔬 OUTPUT PANEL 2: Permanent Reference Asset Register
+    st.markdown("---")
+    st.subheader("🔬 Permanent Reference Sample Collection (Retained Assets)")
+    if not df_samples_filtered.empty:
+        st.dataframe(df_samples_filtered, use_container_width=True)
+    else:
+        st.info("No reference sample tokens match your selected filter criteria.")
+        
+    # 📊 OUTPUT PANEL 3: Dynamic Visual Graph (Filtered Universally)
+    st.markdown("---")
+    st.subheader("📊 Lot Stock Allocation Levels (Delivered vs Remaining)")
     if not df_chart_filtered.empty:
         chart_pivot = df_chart_filtered.pivot(index="Lot Reference", columns="Metric Type", values="Quantity").fillna(0)
-        st.bar_chart(
-            data=chart_pivot,
-            color=["#0068c9", "#29b573"], # Blue = Shipped | Green = Remaining Inventory
-            use_container_width=True,
-            height=380
-        )
+        st.bar_chart(data=chart_pivot, color=["#0068c9", "#29b573"], use_container_width=True, height=380)
     else:
-        st.info("No active production transaction logs match your chosen filter criteria.")
+        st.info("No graphical bars match your selected filter criteria.")
         
+    # 🔍 OUTPUT PANEL 4: Granular Material Ledger (Filtered Universally)
     st.markdown("---")
-    
-    # DISPLAY VIEWPANEL SECTION 4: Full-Width Lot Matrix Grid
     st.subheader("🔍 Lot-by-Lot Traceability Breakdown Matrix Ledger")
-    st.dataframe(df_lots_filtered, use_container_width=True, height=400)
+    if not df_lots_filtered.empty:
+        st.dataframe(df_lots_filtered, use_container_width=True, height=400)
+    else:
+        st.info("No granular batch records match your selected filter criteria.")
 
 else:
     st.info("No validated transaction entries are currently available to compute stock numbers.")
