@@ -9,19 +9,20 @@ supabase: Client = create_client(url, key)
 
 def fetch_raw_ledger_payload():
     """
-    Fetches raw transactional parameters from your Supabase backend.
+    Fetches validated ledger records from your Supabase staging database backend.
     """
     try:
         response = supabase.table("staging_ledger") \
-            .select("part_number, description, entry_type, ref_challan_no, challan_no, qty_nos") \
+            .select("date, part_number, description, entry_type, ref_challan_no, challan_no, qty_nos") \
             .eq("is_validated", True) \
+            .order("date", desc=False) \
             .execute()
         return response.data
     except Exception as e:
         st.error(f"Error fetching database values: {str(e)}")
         return []
 
-# Set up Dashboard Grid Layout Presentation
+# Set up Dashboard Grid Presentation Layout
 st.set_page_config(page_title="ClassicIndustries | Stock Master", layout="wide")
 st.title("📦 Live Work-In-Progress (WIP) Stock Master")
 st.markdown("---")
@@ -29,67 +30,71 @@ st.markdown("---")
 raw_data = fetch_raw_ledger_payload()
 
 if raw_data:
-    # 1. Initialize data dictionaries for grouping
-    global_stock = {} # Maps Part Number -> Total Warehouse Summary
-    lot_stock = {}    # Maps (Part Number, Lot ID) -> Granular History Tracking Matrices
+    global_stock = {}  # Tracks net running balances per SKU
+    lot_stock = {}     # Key: (part_number, lot_id) -> Tracks histories chronologically
+    inward_sequence = [] # Tracks the exact arrival timeline of incoming lots for FIFO sorting
 
-    # 2. Process all incoming inventory lots to establish baseline figures
+    # PASS 1: Log all Inward deliveries chronologically to establish our baselines
     for row in raw_data:
         part = row["part_number"].strip().upper()
         desc = row["description"].strip().upper()
         qty = int(row["qty_nos"])
         
         if row["entry_type"].strip().lower() == "inward":
-            lot_id = row["challan_no"].strip().upper()  # Inward lot number
+            lot_id = row["challan_no"].strip().upper()
             
-            # Global Stock Map Setup
+            # Populate Global Summary Map
             if part not in global_stock:
                 global_stock[part] = {"description": desc, "inward": 0, "outward": 0}
             global_stock[part]["inward"] += qty
             
-            # Lot-by-Lot Stock Map Setup
+            # Populate Granular Lot Record Map
             lot_key = (part, lot_id)
             if lot_key not in lot_stock:
-                lot_stock[lot_key] = {"description": desc, "inward": 0, "outward": 0}
+                lot_stock[lot_key] = {"description": desc, "inward": 0, "outward": 0, "date": row["date"]}
+                inward_sequence.append(lot_key)
             lot_stock[lot_key]["inward"] += qty
 
-    # 3. Process dispatches and execute adaptive fallback tracking for "NO-REF" rows
+    # PASS 2: Deduct dispatches, automatically routing inconsistent lot links via FIFO
     for row in raw_data:
         if row["entry_type"].strip().lower() == "outward":
             part = row["part_number"].strip().upper()
             qty = int(row["qty_nos"])
-            ref_lot = row["ref_challan_no"].strip().upper()
+            ref_lot_str = row["ref_challan_no"].strip().upper()
             
-            # Record dispatch count on global metric tracks
+            # Log dispatch securely on global metrics tracking lines
             if part in global_stock:
                 global_stock[part]["outward"] += qty
+                
+            allocated_qty = qty
             
-            # Record dispatch count on lot metric tracks
-            if ref_lot != "NO-REF" and ref_lot != "SELF":
-                lot_key = (part, ref_lot)
-                if lot_key not in lot_stock:
-                    lot_stock[lot_key] = {"description": row["description"].strip().upper(), "inward": 0, "outward": 0}
-                lot_stock[lot_key]["outward"] += qty
-            else:
-                # HYBRID ADAPTIVE FALLBACK RULE: Deduct from oldest available matching lot pool
-                allocated_qty = qty
-                for (lot_part, lot_id) in lot_stock.keys():
-                    if lot_part == part:
-                        available_in_lot = lot_stock[(lot_part, lot_id)]["inward"] - lot_stock[(lot_part, lot_id)]["outward"]
-                        if available_in_lot >= allocated_qty:
-                            lot_stock[(lot_part, lot_id)]["outward"] += allocated_qty
+            # Sub-Path A: Check for a clear single lot match
+            if ref_lot_str not in ["NO-REF", "SELF", "NONE"] and "&" not in ref_lot_str:
+                lot_key = (part, ref_lot_str)
+                if lot_key in lot_stock:
+                    lot_stock[lot_key]["outward"] += allocated_qty
+                    allocated_qty = 0
+            
+            # Sub-Path B: FIFO Routing for composite records containing ampersands, typos, or "NO-REF"
+            if allocated_qty > 0:
+                for lot_key in inward_sequence:
+                    if lot_key[0] == part: # Match by Part Number
+                        available_in_batch = lot_stock[lot_key]["inward"] - lot_stock[lot_key]["outward"]
+                        
+                        if available_in_batch >= allocated_qty:
+                            lot_stock[lot_key]["outward"] += allocated_qty
                             allocated_qty = 0
                             break
-                        elif available_in_lot > 0:
-                            lot_stock[(lot_part, lot_id)]["outward"] += available_in_lot
-                            allocated_qty -= available_in_lot
+                        elif available_in_batch > 0:
+                            lot_stock[lot_key]["outward"] += available_in_batch
+                            allocated_qty -= available_in_batch
                 
-                # If "NO-REF" volume exceeds all active matching pools, place remainder on global tracker fallback
-                if allocated_qty > 0 and part in global_stock:
-                    virtual_key = (part, "UNASSIGNED OVERFLOW")
-                    if virtual_key not in lot_stock:
-                        lot_stock[virtual_key] = {"description": row["description"].strip().upper(), "inward": 0, "outward": 0}
-                    lot_stock[virtual_key]["outward"] += allocated_qty
+                # If an outward entry exceeds all known inward records, log the remainder to a virtual overflow row
+                if allocated_qty > 0:
+                    overflow_key = (part, "UNASSIGNED OVERFLOW")
+                    if overflow_key not in lot_stock:
+                        lot_stock[overflow_key] = {"description": row["description"].strip().upper(), "inward": 0, "outward": 0, "date": row["date"]}
+                    lot_stock[overflow_key]["outward"] += allocated_qty
 
     # 4. Render Consolidated Global Balances Section Table
     st.subheader("📋 Consolidated Global Part Balances")
@@ -130,7 +135,7 @@ if raw_data:
             chart_rows.append({"Lot Reference": lot_label, "Metric Type": "Remaining WIP Stock (Nos)", "Quantity": display_bal})
             
     df_lots = pd.DataFrame(lot_rows)
-    df_chart = pd.DataFrame(chart_rows) # FIX: Directly maps to clean, variable-independent chart data list
+    df_chart = pd.DataFrame(chart_rows)
     
     # 6. Side-by-Side Table Matrix and Stacked Segment Chart Presentation Layout
     st.subheader("🔍 Lot-by-Lot Traceability Breakdown & Stock Allocation Chart")
@@ -148,8 +153,7 @@ if raw_data:
             
             st.bar_chart(
                 data=chart_pivot,
-                #color=["#ff4b4b", "#0068c9"], # Red = Shipped Outward | Blue = Remaining WIP Inventory
-                color=["#29b573", "#0068c9"], # Green = Shipped Outward | Blue = Remaining WIP Inventory
+                color=["#29b573","#0068c9"], # Green = Shipped Outward | Blue = Remaining WIP Inventory
                 use_container_width=True,
                 height=420
             )
