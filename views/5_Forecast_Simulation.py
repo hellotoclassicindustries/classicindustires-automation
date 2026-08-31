@@ -46,8 +46,9 @@ col_p1, col_p2, col_p3 = st.columns(3)
 with col_p1:
     catalog_df["display_name"] = catalog_df["part_number"].astype(str) + " - " + catalog_df["description"].astype(str).str.upper()
     display_options = catalog_df["display_name"].unique()
-    selected_display = st.selectbox("Select Component", display_options)
+    selected_display = st.selectbox("Select Component (Part Number & Description)", display_options)
     
+    # Secure row indexing dictionary extraction
     matched_records = catalog_df[catalog_df["display_name"] == selected_display].to_dict(orient="records")
     part_meta = matched_records[0]
     weight_kg = float(part_meta["weight_kg"])
@@ -71,7 +72,7 @@ with col_p3:
 st.markdown("---")
 
 # ============================================================================
-# 3. OPTIONAL PIECE COUNT OUTPUT SLOTS
+# 3. OPTIONAL DYNAMIC MACHINE PRODUCTION COUNTER INPUT GRID (EXPLICIT LABELS)
 # ============================================================================
 st.subheader("🔢 Machine Output Entry Block (Optional)")
 st.markdown("*Leave these counts at 0 to view pure Break-Even Forecasting values.*")
@@ -82,10 +83,17 @@ actual_counts = []
 for idx in range(active_jhulas):
     col_selector = j_cols[idx % 5]
     with col_selector:
-        pcs = st.number_input(f"Jhula {idx + 1} Production (Pcs)", min_value=0, value=0, key=f"jhula_{idx}")
+        # Renders explicitly as "Actual Production Per Hour (JhulaX) (Pieces)"
+        pcs = st.number_input(
+            f"Actual Production Per Hour (Jhula{idx + 1}) (Pieces)", 
+            min_value=0, 
+            value=0, 
+            key=f"jhula_{idx}"
+        )
         actual_counts.append(pcs)
 
-total_shift_pieces = sum(actual_counts)
+# Calculates total shift pieces based on hourly rates
+total_shift_pieces = sum(actual_counts) * active_hours
 total_shift_tonnage = (total_shift_pieces * weight_kg) / 1000.0
 gross_shift_revenue = total_shift_tonnage * billing_rate_per_ton
 slab_factor = slab_pct_input / 100.0
@@ -93,11 +101,11 @@ slab_factor = slab_pct_input / 100.0
 is_simulation_mode = total_shift_pieces > 0
 total_variable_labor_cost = total_shift_tonnage * variable_labor_per_ton
 
-# Evaluate the hierarchy conditions
+# Evaluate hierarchy parameters
 has_slab = slab_pct_input > 0
 has_bills = monthly_factory_bills > 0
-
 # Core Model Formulations
+# Standard Model Calculations (Column B)
 maint_allocation_b = (monthly_factory_bills / 30.0) if has_bills else 0.0
 net_margin_ton_b = billing_rate_per_ton - variable_labor_per_ton
 min_ton_b = (maint_allocation_b + fixed_labor_payroll) / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
@@ -106,6 +114,7 @@ total_shift_runtime_units = active_jhulas * active_hours
 min_rate_hr_b = min_pieces_b / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 net_profit_b = gross_shift_revenue - (maint_allocation_b + fixed_labor_payroll + total_variable_labor_cost)
 
+# Dynamic Slab Model Calculations (Column D)
 maint_allocation_d = gross_shift_revenue * slab_factor if has_slab else 0.0
 net_margin_ton_d = (billing_rate_per_ton * (1.0 - slab_factor)) - variable_labor_per_ton
 min_ton_d = fixed_labor_payroll / net_margin_ton_d if net_margin_ton_d > 0 else 0.0
@@ -113,10 +122,12 @@ min_pieces_d = (min_ton_d * 1000.0) / weight_kg if weight_kg > 0 else 0.0
 min_rate_hr_d = min_pieces_d / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 net_profit_d = gross_shift_revenue - (maint_allocation_d + fixed_labor_payroll + total_variable_labor_cost)
 
+# Staff Payroll Only Model Calculations (Fallback)
 min_ton_payroll_only = fixed_labor_payroll / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
 min_pieces_payroll_only = (min_ton_payroll_only * 1000.0) / weight_kg if weight_kg > 0 else 0.0
 min_rate_hr_payroll_only = min_pieces_payroll_only / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 net_profit_payroll_only = gross_shift_revenue - (fixed_labor_payroll + total_variable_labor_cost)
+
 if has_slab:
     active_model_desc = f"⚡ DYNAMIC VARIABLE SLAB MODEL ACTIVE ({slab_pct_input}%)"
     model_color = "#e2efda"
@@ -130,57 +141,72 @@ else:
     model_color = "#fff2cc"
     border_color = "#d6b656"
 
+# ============================================================================
+# 4. FINANCIAL SIMULATOR VIEW (RENDERS IF PIECES > 0)
+# ============================================================================
 if is_simulation_mode:
     st.subheader("💵 Live Shift Financial Performance Summary")
+    
     if has_bills and has_slab:
         sim_col_b, sim_col_d = st.columns(2)
         with sim_col_b:
-            st.markdown("<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border-left: 4px solid #595959; font-weight: bold;'>📊 Standard Model Performance</div>", unsafe_allow_html=True)
+            st.markdown("<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border-left: 4px solid #595959; font-weight: bold;'>📊 Standard Model Performance (Col B)</div>", unsafe_allow_html=True)
             st.write(f"**Gross Revenue:** ₹{gross_shift_revenue:,.2f}")
-            st.write(f"**Overhead Applied:** ₹{maint_allocation_b:,.2f}")
+            st.write(f"**Fixed Overhead Applied:** ₹{maint_allocation_b:,.2f}")
             st.metric("Net Shift Profit (Col B)", f"₹{net_profit_b:,.2f}")
         with sim_col_d:
-            st.markdown("<div style='background-color: #e2efda; padding: 10px; border-radius: 5px; border-left: 4px solid #006100; font-weight: bold;'>⚡ Dynamic Slab Performance</div>", unsafe_allow_html=True)
+            st.markdown("<div style='background-color: #e2efda; padding: 10px; border-radius: 5px; border-left: 4px solid #006100; font-weight: bold;'>⚡ Dynamic Slab Performance (Col D)</div>", unsafe_allow_html=True)
             st.write(f"**Gross Revenue:** ₹{gross_shift_revenue:,.2f}")
-            st.write(f"**Overhead Applied:** ₹{maint_allocation_d:,.2f}")
+            st.write(f"**Variable Overhead Applied:** ₹{maint_allocation_d:,.2f}")
             st.metric("Net Shift Profit (Col D)", f"₹{net_profit_d:,.2f}")
+            
     elif has_slab:
         st.markdown(f"<div style='background-color: #e2efda; padding: 10px; border-radius: 5px; border-left: 4px solid #006100; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
         f_col1, f_col2, f_col3 = st.columns(3)
         f_col1.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
         f_col2.metric("Maint Overhead (Slab)", f"₹{maint_allocation_d:,.2f}")
         f_col3.metric("Net Shift Profit", f"₹{net_profit_d:,.2f}")
+        
     elif has_bills:
         st.markdown(f"<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border-left: 4px solid #595959; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
         f_col1, f_col2, f_col3 = st.columns(3)
         f_col1.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
         f_col2.metric("Maint Overhead (Flat)", f"₹{maint_allocation_b:,.2f}")
         f_col3.metric("Net Shift Profit", f"₹{net_profit_b:,.2f}")
+        
     else:
         st.markdown(f"<div style='background-color: #fff2cc; padding: 10px; border-radius: 5px; border-left: 4px solid #d6b656; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
         f_col1, f_col2, f_col3 = st.columns(3)
         f_col1.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
         f_col2.metric("Maint Overhead Cost", "₹0.00")
         f_col3.metric("Net Shift Profit", f"₹{net_profit_payroll_only:,.2f}")
+        
     st.markdown("---")
-
-# Forecasting Engine Displays
+# ============================================================================
+# 5. FORECASTING CAPACITY ENGINE BLOCK
+# ============================================================================
 st.subheader("🔮 Break-Even Target Forecasting Engine")
+
+# CONDITION A: Both are defined -> Render side-by-side comparison columns
 if has_bills and has_slab:
     st.markdown("<div style='color: #444444; font-weight: bold; margin-bottom: 15px;'>⚖️ Both Parameters Defined: Comparing Standard vs. Slab Models Side-by-Side</div>", unsafe_allow_html=True)
     left_column, right_column = st.columns(2)
+    
     with left_column:
         st.markdown("<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #595959;'><h4 style='margin-top:0;'>📊 Standard Flat Model (Column B)</h4></div>", unsafe_allow_html=True)
         st.write(f"**Net Margin / Ton:** ₹{net_margin_ton_b:,.2f}")
         st.metric("Break-Even Target (Volume)", f"{min_ton_b:.3f} Tons")
         st.metric("Casting Pieces Needed", f"{int(min_pieces_b)} Pcs")
         st.success(f"**Target Floor Pace:** {min_rate_hr_b:.2f} Pcs / Hr / Machine")
+
     with right_column:
         st.markdown("<div style='background-color: #e2efda; padding: 15px; border-radius: 8px; border-left: 5px solid #006100;'><h4 style='margin-top:0; color: #006100;'>⚡ Dynamic Slab Model (Column D)</h4></div>", unsafe_allow_html=True)
         st.write(f"**Net Margin / Ton:** ₹{net_margin_ton_d:,.2f}")
         st.metric("Break-Even Target (Volume)", f"{min_ton_d:.3f} Tons")
         st.metric("Casting Pieces Needed", f"{int(min_pieces_d)} Pcs")
         st.success(f"**Target Floor Pace:** {min_rate_hr_d:.2f} Pcs / Hr / Machine")
+
+# CONDITION B: Only the Dynamic Slab percentage parameter is defined
 elif has_slab:
     st.markdown("<div style='background-color: #e2efda; padding: 20px; border-radius: 8px; border-left: 6px solid #006100;'>", unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
@@ -193,6 +219,8 @@ elif has_slab:
         st.metric("🎯 Total Casting Pieces Needed", f"{int(min_pieces_d)} Pcs")
         st.success(f"**🚀 Required Floor Pace:** {min_rate_hr_d:.2f} Pcs / Hour / Machine")
     st.markdown("</div>", unsafe_allow_html=True)
+
+# CONDITION C: Only the Flat Monthly Bills parameter is defined
 elif has_bills:
     st.markdown("<div style='background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 6px solid #595959;'>", unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
@@ -206,6 +234,8 @@ elif has_bills:
         st.metric("🎯 Total Casting Pieces Needed", f"{int(min_pieces_b)} Pcs")
         st.success(f"**🚀 Required Floor Pace:** {min_rate_hr_b:.2f} Pcs / Hour / Machine")
     st.markdown("</div>", unsafe_allow_html=True)
+
+# CONDITION D: Neither parameter has a value -> Fall back strictly to Staff Payroll Only
 else:
     st.markdown("<div style='background-color: #fff2cc; padding: 20px; border-radius: 8px; border-left: 6px solid #d6b656;'>", unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
