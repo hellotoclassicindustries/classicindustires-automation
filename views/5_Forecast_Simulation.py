@@ -142,52 +142,10 @@ else:
     border_color = "#d6b656"
 
 # ============================================================================
-# 4. FINANCIAL SIMULATOR VIEW (RENDERS IF PIECES > 0)
-# ============================================================================
-if is_simulation_mode:
-    st.subheader("💵 Live Shift Financial Performance Summary")
-    
-    if has_bills and has_slab:
-        sim_col_b, sim_col_d = st.columns(2)
-        with sim_col_b:
-            st.markdown("<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border-left: 4px solid #595959; font-weight: bold;'>📊 Standard Model Performance (Col B)</div>", unsafe_allow_html=True)
-            st.write(f"**Gross Revenue:** ₹{gross_shift_revenue:,.2f}")
-            st.write(f"**Fixed Overhead Applied:** ₹{maint_allocation_b:,.2f}")
-            st.metric("Net Shift Profit (Col B)", f"₹{net_profit_b:,.2f}")
-        with sim_col_d:
-            st.markdown("<div style='background-color: #e2efda; padding: 10px; border-radius: 5px; border-left: 4px solid #006100; font-weight: bold;'>⚡ Dynamic Slab Performance (Col D)</div>", unsafe_allow_html=True)
-            st.write(f"**Gross Revenue:** ₹{gross_shift_revenue:,.2f}")
-            st.write(f"**Variable Overhead Applied:** ₹{maint_allocation_d:,.2f}")
-            st.metric("Net Shift Profit (Col D)", f"₹{net_profit_d:,.2f}")
-            
-    elif has_slab:
-        st.markdown(f"<div style='background-color: #e2efda; padding: 10px; border-radius: 5px; border-left: 4px solid #006100; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
-        f_col1, f_col2, f_col3 = st.columns(3)
-        f_col1.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
-        f_col2.metric("Maint Overhead (Slab)", f"₹{maint_allocation_d:,.2f}")
-        f_col3.metric("Net Shift Profit", f"₹{net_profit_d:,.2f}")
-        
-    elif has_bills:
-        st.markdown(f"<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border-left: 4px solid #595959; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
-        f_col1, f_col2, f_col3 = st.columns(3)
-        f_col1.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
-        f_col2.metric("Maint Overhead (Flat)", f"₹{maint_allocation_b:,.2f}")
-        f_col3.metric("Net Shift Profit", f"₹{net_profit_b:,.2f}")
-        
-    else:
-        st.markdown(f"<div style='background-color: #fff2cc; padding: 10px; border-radius: 5px; border-left: 4px solid #d6b656; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
-        f_col1, f_col2, f_col3 = st.columns(3)
-        f_col1.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
-        f_col2.metric("Maint Overhead Cost", "₹0.00")
-        f_col3.metric("Net Shift Profit", f"₹{net_profit_payroll_only:,.2f}")
-        
-    st.markdown("---")
-# ============================================================================
 # 5. FORECASTING CAPACITY ENGINE BLOCK
 # ============================================================================
 st.subheader("🔮 Break-Even Target Forecasting Engine")
 
-# CONDITION A: Both are defined -> Render side-by-side comparison columns
 if has_bills and has_slab:
     st.markdown("<div style='color: #444444; font-weight: bold; margin-bottom: 15px;'>⚖️ Both Parameters Defined: Comparing Standard vs. Slab Models Side-by-Side</div>", unsafe_allow_html=True)
     left_column, right_column = st.columns(2)
@@ -206,7 +164,6 @@ if has_bills and has_slab:
         st.metric("Casting Pieces Needed", f"{int(min_pieces_d)} Pcs")
         st.success(f"**Target Floor Pace:** {min_rate_hr_d:.2f} Pcs / Hr / Machine")
 
-# CONDITION B: Only the Dynamic Slab percentage parameter is defined
 elif has_slab:
     st.markdown("<div style='background-color: #e2efda; padding: 20px; border-radius: 8px; border-left: 6px solid #006100;'>", unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
@@ -220,7 +177,6 @@ elif has_slab:
         st.success(f"**🚀 Required Floor Pace:** {min_rate_hr_d:.2f} Pcs / Hour / Machine")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# CONDITION C: Only the Flat Monthly Bills parameter is defined
 elif has_bills:
     st.markdown("<div style='background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 6px solid #595959;'>", unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
@@ -235,7 +191,6 @@ elif has_bills:
         st.success(f"**🚀 Required Floor Pace:** {min_rate_hr_b:.2f} Pcs / Hour / Machine")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# CONDITION D: Neither parameter has a value -> Fall back strictly to Staff Payroll Only
 else:
     st.markdown("<div style='background-color: #fff2cc; padding: 20px; border-radius: 8px; border-left: 6px solid #d6b656;'>", unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
@@ -251,16 +206,42 @@ else:
 
 st.markdown("---")
 
-with st.expander("📝 View Active Costing Hierarchy Equations"):
-    if has_slab:
-        st.markdown("### ⚡ Active Formula Profile: Dynamic Variable Slab Model")
-        st.latex(r"\text{Net Margin Ton} = [\text{Billing Rate} \times (1 - \text{Slab \%})] - \text{Variable Labor Per Ton}")
-        st.latex(r"\text{Break Even Tonnage} = \frac{\text{Fixed Labor Shift Payroll}}{\text{Net Margin Retained Per Ton}}")
-    else:
-        st.markdown("### 📊 Active Formula Profile: Standard Flat Model")
-        st.latex(r"\text{Flat Daily Overhead} = \frac{\text{Total Monthly Bills}}{30}")
-        st.latex(r"\text{Net Margin Ton} = \text{Billing Rate} - \text{Variable Labor Per Ton}")
-        st.latex(r"\text{Break Even Tonnage} = \frac{\text{Flat Daily Overhead} + \text{Fixed Labor Shift Payroll}}{\text{Net Margin Retained Per Ton}}")
+# ============================================================================
+# 7. AUTOMATED MATHEMATICAL FORMULAS EXPANDER (DYNAMIC ALL-ACTIVE PROFILES)
+# ============================================================================
+with st.expander("📝 View Active Costing Hierarchy Equations & Operational Formulas"):
+    
+    # Global Production Constants Block (Always Visible)
+    st.markdown("### 🏭 Global Production Equations")
+    st.latex(r"\text{Total Pieces Processed} = \sum (\text{Actual Pieces Per Jhula}) \times \text{Active Production Hours}")
+    st.latex(r"\text{Total Tonnage (MT)} = \frac{\text{Total Pieces} \times \text{Casting Weight (Kg)}}{1000}")
+    st.latex(r"\text{Gross Revenue (₹)} = \text{Total Tonnage} \times \text{Billing Rate Per Ton}")
+    st.markdown("---")
+    
+    # Condition: If Flat Bills are configured, expose Column B Math
+    if has_bills:
+        st.markdown("### 📊 Standard Flat Bills Model Formulas (Column B)")
+        st.latex(r"\text{Flat Daily Overhead (₹)} = \frac{\text{Total Monthly Factory Bills}}{30}")
+        st.latex(r"\text{Net Margin / Ton (Col B)} = \text{Billing Rate} - \text{Variable Labor Per Ton}")
+        st.latex(r"\text{Break Even Tonnage (Col B)} = \frac{\text{Flat Daily Overhead} + \text{Fixed Labor Shift Payroll}}{\text{Net Margin / Ton (Col B)}}")
+        st.latex(r"\text{Pieces Required (Col B)} = \frac{\text{Break Even Tonnage (Col B)} \times 1000}{\text{Casting Weight (Kg)}}")
+        st.latex(r"\text{Target Floor Pace (Col B)} = \frac{\text{Pieces Required (Col B)}}{\text{Active Jhulas} \times \text{Active Production Hours}}")
+        st.markdown("---")
         
-    st.latex(r"\text{Casting Pieces Needed} = \frac{\text{Break Even Tonnage} \times 1000}{\text{Weight (Kg)}}")
-    st.latex(r"\text{Target Floor Pace} = \frac{\text{Casting Pieces Needed}}{\text{Active Jhulas} \times \text{Active Hours}}")
+    # Condition: If Slab Allocation percentage is configured, expose Column D Math
+    if has_slab:
+        st.markdown("### ⚡ Dynamic Variable Slab Model Formulas (Column D)")
+        st.latex(r"\text{Variable Maintenance Cost (₹)} = \text{Gross Revenue} \times \text{Allocation \%}")
+        st.latex(r"\text{Net Margin / Ton (Col D)} = [\text{Billing Rate} \times (1 - \text{Allocation \%})] - \text{Variable Labor Per Ton}")
+        st.latex(r"\text{Break Even Tonnage (Col D)} = \frac{\text{Fixed Labor Shift Payroll}}{\text{Net Margin / Ton (Col D)}}")
+        st.latex(r"\text{Pieces Required (Col D)} = \frac{\text{Break Even Tonnage (Col D)} \times 1000}{\text{Casting Weight (Kg)}}")
+        st.latex(r"\text{Target Floor Pace (Col D)} = \frac{\text{Pieces Required (Col D)}}{\text{Active Jhulas} \times \text{Active Production Hours}}")
+        st.markdown("---")
+        
+    # Condition: Fallback State if neither are configured
+    if not has_bills and not has_slab:
+        st.markdown("### ⚠️ Staff Payroll Only Model Formulas")
+        st.latex(r"\text{Net Margin / Ton} = \text{Billing Rate} - \text{Variable Labor Per Ton}")
+        st.latex(r"\text{Break Even Tonnage} = \frac{\text{Fixed Labor Shift Payroll}}{\text{Net Margin / Ton}}")
+        st.latex(r"\text{Pieces Required} = \frac{\text{Break Even Tonnage} \times 1000}{\text{Casting Weight (Kg)}}")
+        st.latex(r"\text{Target Floor Pace} = \frac{\text{Pieces Required}}{\text{Active Jhulas} \times \text{Active Production Hours}}")
