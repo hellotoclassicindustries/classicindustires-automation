@@ -48,14 +48,15 @@ with col_p1:
     display_options = catalog_df["display_name"].unique()
     selected_display = st.selectbox("Select Component (Part Number & Description)", display_options)
     
-    part_meta = catalog_df[catalog_df["display_name"] == selected_display].iloc
+    # 🚀 THE CRITICAL CORRECTION: Append .iloc[0] to treat the output securely as a single dictionary data row!
+    part_meta = catalog_df[catalog_df["display_name"] == selected_display].iloc[0]
     weight_kg = float(part_meta["weight_kg"])
     billing_rate_per_ton = float(part_meta["billing_rate_per_ton"])
     
-    st.info(f"**Part Number:** {part_meta['part_number'].upper()}\n\n"
+    st.info(f"**Part Number:** {str(part_meta['part_number']).upper()}\n\n"
             f"**Casting Weight:** {weight_kg:.2f} Kg\n\n"
             f"**Weight Class:** {part_meta['part_class']}\n\n"
-            f"**Hoist Requirement:** {part_meta['handling_requirement'].upper()}")
+            f"**Hoist Requirement:** {str(part_meta['handling_requirement']).upper()}")
 
 with col_p2:
     active_jhulas = st.number_input("Number of Active Jhula Machines", min_value=1, max_value=10, value=2)
@@ -64,7 +65,6 @@ with col_p2:
     variable_labor_per_ton = st.number_input("Per-Ton Variable Labor Payout (₹)", min_value=0.0, value=0.0)
 
 with col_p3:
-    # Optional inputs implementing your hierarchy rule
     monthly_factory_bills = st.number_input("Total Monthly Factory Bills (₹) [Leave 0 if using Slab]", min_value=0.0, value=0.0)
     slab_pct_input = st.number_input("Factory Maintenance Fund Allocation (%) [Leave 0 if using Bills]", min_value=0.0, max_value=100.0, value=35.0)
     st.success(f"**Billing Rate Assigned:** ₹{billing_rate_per_ton:,.2f} / Ton")
@@ -96,7 +96,6 @@ is_simulation_mode = total_shift_pieces > 0
 # ============================================================================
 # 4. HIERARCHY EVALUATION LOGIC
 # ============================================================================
-# Determine which active model route the calculation must follow
 has_slab = slab_pct_input > 0
 has_bills = monthly_factory_bills > 0
 
@@ -145,14 +144,11 @@ st.subheader("🔮 Break-Even Target Forecasting Engine")
 st.markdown(f"Running calculation layout following hierarchy logic: **{active_model_desc}**")
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Math execution based on your hierarchy conditions
 if has_slab:
-    # Slab Rules: Retained margin per ton shrinks by the percentage factor
     net_margin_ton = (billing_rate_per_ton * (1.0 - slab_factor)) - variable_labor_per_ton
     min_tonnage = fixed_labor_payroll / net_margin_ton if net_margin_ton > 0 else 0.0
     maint_disp = f"₹{min_tonnage * billing_rate_per_ton * slab_factor:,.2f} (Computed Dynamic Slab Cost)"
 else:
-    # Flat Bills or Payroll Only Rules: Margin is simply full billing rate minus variable labor
     net_margin_ton = billing_rate_per_ton - variable_labor_per_ton
     flat_daily_overhead = (monthly_factory_bills / 30.0) if has_bills else 0.0
     min_tonnage = (flat_daily_overhead + fixed_labor_payroll) / net_margin_ton if net_margin_ton > 0 else 0.0
@@ -162,7 +158,6 @@ min_pieces = (min_tonnage * 1000.0) / weight_kg if weight_kg > 0 else 0.0
 total_shift_runtime_units = active_jhulas * active_hours
 min_rate_hr = min_pieces / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 
-# Render Single Clean Active Output Card
 st.markdown(f"<div style='background-color: {model_color}; padding: 20px; border-radius: 8px; border-left: 6px solid {border_color};'>", unsafe_allow_html=True)
 
 fc1, fc2 = st.columns(2)
