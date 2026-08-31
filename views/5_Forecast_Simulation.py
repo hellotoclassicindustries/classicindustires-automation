@@ -34,29 +34,36 @@ def fetch_master_catalog():
 catalog_df = fetch_master_catalog()
 
 if catalog_df.empty:
-    st.warning("📋 Operations Notice: The master part catalog database is empty or disconnected. Please sync parts from your Google Sheet master catalog.")
+    st.warning("📋 Operations Notice: The master part catalog database is empty or disconnected.")
     st.stop()
 
 st.title("🔮 Job-Work Forecast & Shift Performance Simulator")
 st.markdown("---")
 
-# Layout Form Grid matching Excel Format
 st.subheader("📊 Parameter / Input Block")
 col_p1, col_p2, col_p3 = st.columns(3)
 
 with col_p1:
-    part_options = catalog_df["part_number"].unique()
-    selected_part = st.selectbox("Select Part Name", part_options)
-    part_meta = catalog_df[catalog_df["part_number"] == selected_part].iloc[0]
+    # 🚀 FIX: Create a combined display string mapping "part_number - description"
+    catalog_df["display_name"] = catalog_df["part_number"].astype(str) + " - " + catalog_df["description"].astype(str).str.upper()
     
-    st.info(f"**Description:** {part_meta['description'].upper()}\n\n"
-            f"**Weight:** {float(part_meta['weight_kg']):.2f} Kg\n\n"
-            f"**Class:** {part_meta['part_class']}")
+    display_options = catalog_df["display_name"].unique()
+    selected_display = st.selectbox("Select Component (Part Number & Description)", display_options)
+    
+    # Trace back the original row properties using our combined key string match
+    part_meta = catalog_df[catalog_df["display_name"] == selected_display].iloc[0]
+    
+    st.info(f"**Part Number:** {part_meta['part_number'].upper()}\n\n"
+            f"**Casting Weight:** {float(part_meta['weight_kg']):.2f} Kg\n\n"
+            f"**Weight Class:** {part_meta['part_class']}\n\n"
+            f"**Hoist Requirement:** {part_meta['handling_requirement'].upper()}")
 
 with col_p2:
     active_jhulas = st.number_input("Number of Active Jhula Machines", min_value=1, max_value=10, value=2)
     active_hours = st.number_input("Active Production Hours Per Shift", min_value=1, max_value=24, value=10)
     fixed_labor_payroll = st.number_input("Fixed Labor Shift Payroll (₹)", min_value=0.0, value=6400.0)
+    # 🚀 ADDED: Contractor variable rate per ton matching Row 20
+    variable_labor_per_ton = st.number_input("Per-Ton Variable Labor Payout (₹)", min_value=0.0, value=0.0)
 
 with col_p3:
     monthly_factory_bills = st.number_input("Total Monthly Factory Bills (₹)", min_value=0.0, value=245000.0)
@@ -67,7 +74,7 @@ with col_p3:
 st.markdown("---")
 
 # ============================================================================
-# 3. OPTIONAL DYNAMIC MACHINE PRODUCTION COUNTER INPUT GRID
+# 3. MACHINE PRODUCTION COUNTER INPUT GRID
 # ============================================================================
 st.subheader("🔢 Machine Output Entry Block (Optional)")
 st.markdown("*Leave these counts at 0 to view pure Break-Even Forecasting values.*")
@@ -87,26 +94,26 @@ total_shift_tonnage = (total_shift_pieces * weight_kg) / 1000.0
 gross_shift_revenue = total_shift_tonnage * billing_rate_per_ton
 slab_factor = slab_pct_input / 100.0
 
-# Determine mode: Simulation if pieces are typed, otherwise Pure Forecasting
 is_simulation_mode = total_shift_pieces > 0
 
 # ============================================================================
-# 4. IF PIECES ENTERED ➔ DISPLAY FINANCIAL RUN SIMULATION
+# 4. FINANCIAL RUN SIMULATION VIEW
 # ============================================================================
 if is_simulation_mode:
     st.subheader("💵 Live Shift Financial Performance Summary")
     
     maint_allocation_b = monthly_factory_bills / 30.0
-    net_profit_b = gross_shift_revenue - (maint_allocation_b + fixed_labor_payroll)
+    # Variable piece rate payroll increases with active production tonnage
+    total_variable_labor_cost = total_shift_tonnage * variable_labor_per_ton
+    net_profit_b = gross_shift_revenue - (maint_allocation_b + fixed_labor_payroll + total_variable_labor_cost)
     
     maint_allocation_d = gross_shift_revenue * slab_factor
-    net_profit_d = gross_shift_revenue - (maint_allocation_d + fixed_labor_payroll)
+    net_profit_d = gross_shift_revenue - (maint_allocation_d + fixed_labor_payroll + total_variable_labor_cost)
     
     f_col1, f_col2, f_col3 = st.columns(3)
     f_col1.metric("Total Pieces Processed", f"{total_shift_pieces} Pcs", f"{total_shift_tonnage:.3f} Tons")
     f_col2.metric("Gross Revenue Realized", f"₹{gross_shift_revenue:,.2f}")
     f_col3.metric("Net Take-Home Profit (Slab Model)", f"₹{net_profit_d:,.2f}")
-    
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ============================================================================
@@ -116,8 +123,10 @@ st.subheader("🔮 Break-Even Target Forecasting Engine")
 left_column, right_column = st.columns(2)
 
 maint_allocation_b = monthly_factory_bills / 30.0
-net_margin_ton_b = billing_rate_per_ton
-net_margin_ton_d = billing_rate_per_ton * (1.0 - slab_factor)
+
+# 🚀 FINANCIAL RE-CALIBRATION: Variable labor shrinks the retained net margin per ton
+net_margin_ton_b = billing_rate_per_ton - variable_labor_per_ton
+net_margin_ton_d = (billing_rate_per_ton * (1.0 - slab_factor)) - variable_labor_per_ton
 
 min_ton_b = (maint_allocation_b + fixed_labor_payroll) / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
 min_ton_d = fixed_labor_payroll / net_margin_ton_d if net_margin_ton_d > 0 else 0.0
@@ -149,20 +158,6 @@ st.markdown("---")
 # 6. MATHEMATICAL FORMULAS EXPANDER VIEW BLOCK
 # ============================================================================
 with st.expander("📝 View Underlying Dashboard Equations & Formulas"):
-    st.markdown("### 🏦 1. Total Shifting Performance Realization")
-    st.latex(r"\text{Total Pieces} = \sum (\text{Actual Pieces Entered Per Jhula})")
-    st.latex(r"\text{Total Tonnage} = \frac{\text{Total Pieces} \times \text{Weight (Kg)}}{1000}")
-    st.latex(r"\text{Gross Revenue (₹)} = \text{Total Tonnage} \times \text{Billing Rate Per Ton}")
-    
-    st.markdown("### 📊 2. Standard Flat Model Costing (Column B)")
-    st.latex(r"\text{Factory Maintenance Cost} = \frac{\text{Total Monthly Bills}}{30}")
-    st.latex(r"\text{Break Even Tonnage} = \frac{\text{Factory Maintenance Cost} + \text{Fixed Labor Shift Payroll}}{\text{Billing Rate Per Ton}}")
-    
-    st.markdown("### ⚡ 3. Dynamic Variable Slab Costing (Column D)")
-    st.latex(r"\text{Factory Maintenance Cost} = \text{Gross Revenue} \times \text{Allocation \%}")
-    st.latex(r"\text{Net Margin Retained Per Ton} = \text{Billing Rate Per Ton} \times (1 - \text{Allocation \%})")
-    st.latex(r"\text{Break Even Tonnage} = \frac{\text{Fixed Labor Shift Payroll}}{\text{Net Margin Retained Per Ton}}")
-    
-    st.markdown("### 🎯 4. Production Pace Metrics")
-    st.latex(r"\text{Casting Pieces Needed} = \frac{\text{Break Even Tonnage} \times 1000}{\text{Weight (Kg)}}")
-    st.latex(r"\text{Target Floor Pace} = \frac{\text{Casting Pieces Needed}}{\text{Active Jhulas} \times \text{Active Hours}}")
+    st.markdown("### 🎯 Variable Labor Net Margin Adjustment Formula")
+    st.latex(r"\text{Net Margin Ton (Col B)} = \text{Billing Rate} - \text{Variable Labor Per Ton}")
+    st.latex(r"\text{Net Margin Ton (Col D)} = [\text{Billing Rate} \times (1 - \text{Slab \%})] - \text{Variable Labor Per Ton}")
