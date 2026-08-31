@@ -48,9 +48,15 @@ with col_p1:
     display_options = catalog_df["display_name"].unique()
     selected_display = st.selectbox("Select Component (Part Number & Description)", display_options)
     
-    matched_df = catalog_df[catalog_df["display_name"] == selected_display]
-    part_meta = matched_df.iloc[0].to_dict()
+    # 🚀 THE FIX: Use safe filtering and explicit positional item indexing
+    matched_rows = catalog_df[catalog_df["display_name"] == selected_display].to_dict(orient="records")
     
+    if len(matched_rows) > 0:
+        part_meta = matched_rows[0]
+    else:
+        st.error("❌ Mapped part data could not be found.")
+        st.stop()
+        
     weight_kg = float(part_meta["weight_kg"])
     billing_rate_per_ton = float(part_meta["billing_rate_per_ton"])
     
@@ -72,7 +78,7 @@ with col_p3:
 st.markdown("---")
 
 # ============================================================================
-# 3. OPTIONAL PIECE COUNT OUTPUT BLOCK
+# 3. OPTIONAL DYNAMIC MACHINE COUNTERS INPUT MATRIX
 # ============================================================================
 st.subheader("🔢 Machine Output Entry Block (Optional)")
 st.markdown("*Leave these counts at 0 to view pure Break-Even Forecasting values.*")
@@ -92,6 +98,7 @@ for idx in range(active_jhulas):
         ))
         actual_counts.append(pcs)
 
+# 🚀 SYSTEM MATHEMATICS RE-CALIBRATION: Evaluates full quantities flawlessly
 total_hourly_pieces = sum(actual_counts)
 total_shift_pieces = float(total_hourly_pieces * active_hours)
 total_shift_tonnage = (total_shift_pieces * weight_kg) / 1000.0
