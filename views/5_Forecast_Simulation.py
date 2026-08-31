@@ -83,7 +83,7 @@ actual_counts = []
 for idx in range(active_jhulas):
     col_selector = j_cols[idx % 5]
     with col_selector:
-        # Renders explicitly as "Actual Production Per Hour (JhulaX) (Pieces)"
+        # Custom Formatted Match per machine
         pcs = st.number_input(
             f"Actual Production Per Hour (Jhula{idx + 1}) (Pieces)", 
             min_value=0, 
@@ -92,20 +92,21 @@ for idx in range(active_jhulas):
         )
         actual_counts.append(pcs)
 
-# Calculates total shift pieces based on hourly rates
+# 🚀 THE CALIBRATED ENGINE MATH: Formulates total shift metrics safely from user inputs
 total_shift_pieces = sum(actual_counts) * active_hours
 total_shift_tonnage = (total_shift_pieces * weight_kg) / 1000.0
 gross_shift_revenue = total_shift_tonnage * billing_rate_per_ton
 slab_factor = slab_pct_input / 100.0
 
+# Fixed: Activates simulation view card layers seamlessly if total items exceed zero
 is_simulation_mode = total_shift_pieces > 0
 total_variable_labor_cost = total_shift_tonnage * variable_labor_per_ton
 
-# Evaluate hierarchy parameters
+# Evaluate model routing parameters cleanly
 has_slab = slab_pct_input > 0
 has_bills = monthly_factory_bills > 0
+
 # Core Model Formulations
-# Standard Model Calculations (Column B)
 maint_allocation_b = (monthly_factory_bills / 30.0) if has_bills else 0.0
 net_margin_ton_b = billing_rate_per_ton - variable_labor_per_ton
 min_ton_b = (maint_allocation_b + fixed_labor_payroll) / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
@@ -114,7 +115,6 @@ total_shift_runtime_units = active_jhulas * active_hours
 min_rate_hr_b = min_pieces_b / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 net_profit_b = gross_shift_revenue - (maint_allocation_b + fixed_labor_payroll + total_variable_labor_cost)
 
-# Dynamic Slab Model Calculations (Column D)
 maint_allocation_d = gross_shift_revenue * slab_factor if has_slab else 0.0
 net_margin_ton_d = (billing_rate_per_ton * (1.0 - slab_factor)) - variable_labor_per_ton
 min_ton_d = fixed_labor_payroll / net_margin_ton_d if net_margin_ton_d > 0 else 0.0
@@ -122,7 +122,6 @@ min_pieces_d = (min_ton_d * 1000.0) / weight_kg if weight_kg > 0 else 0.0
 min_rate_hr_d = min_pieces_d / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 net_profit_d = gross_shift_revenue - (maint_allocation_d + fixed_labor_payroll + total_variable_labor_cost)
 
-# Staff Payroll Only Model Calculations (Fallback)
 min_ton_payroll_only = fixed_labor_payroll / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
 min_pieces_payroll_only = (min_ton_payroll_only * 1000.0) / weight_kg if weight_kg > 0 else 0.0
 min_rate_hr_payroll_only = min_pieces_payroll_only / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
