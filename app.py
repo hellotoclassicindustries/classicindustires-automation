@@ -20,10 +20,12 @@ if "authenticated" not in st.session_state:
 about_page = st.Page("views/1_About_Us.py", title="Classic Industries Home", icon="🏢", default=True)
 stock_page = st.Page("views/2_Stock_Master.py", title="Stock Master Dashboard", icon="📊")
 ledger_page = st.Page("views/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝")
+forcasting_page= st.Page("views/5_Forecast_Simulation.py", title="Forecast Simulation View", icon="🔮")
 guide_page = st.Page("views/4_System_Guide.py", title="System User Guide", icon="📘")
 
+
 # Mount full array map configurations
-pages = [about_page, stock_page, ledger_page, guide_page]
+pages = [about_page, stock_page, ledger_page, forcasting_page, guide_page]
 
 # Run Core Navigation Controller
 pg = st.navigation(pages)
