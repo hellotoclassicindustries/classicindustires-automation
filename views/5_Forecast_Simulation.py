@@ -3,7 +3,7 @@ import pandas as pd
 from supabase import create_client
 
 # ============================================================================
-# 1. CLOUD STORAGE REPOSITORY INTEGRATION
+# 1. SECURE DATABASE CONNECTION INTEGRATION
 # ============================================================================
 @st.cache_resource
 def init_supabase_connection():
@@ -29,7 +29,7 @@ def fetch_master_catalog():
         return pd.DataFrame()
 
 # ============================================================================
-# 2. EXECUTIVE OVERHEAD PARAMETER SELECTION BLOCK
+# 2. DATA INGESTION & UI PARAMETER BLOCKS
 # ============================================================================
 catalog_df = fetch_master_catalog()
 
@@ -48,9 +48,9 @@ with col_p1:
     display_options = catalog_df["display_name"].unique()
     selected_display = st.selectbox("Select Component (Part Number & Description)", display_options)
     
-    # Secure row indexing dictionary extraction
-    matched_records = catalog_df[catalog_df["display_name"] == selected_display].to_dict(orient="records")
-    part_meta = matched_records[0]
+    matched_df = catalog_df[catalog_df["display_name"] == selected_display]
+    part_meta = matched_df.iloc[0].to_dict()
+    
     weight_kg = float(part_meta["weight_kg"])
     billing_rate_per_ton = float(part_meta["billing_rate_per_ton"])
     
@@ -59,20 +59,20 @@ with col_p1:
             f"**Weight Class:** {part_meta['part_class']}\n\n"
             f"**Hoist Requirement:** {str(part_meta['handling_requirement']).upper()}")
 with col_p2:
-    active_jhulas = st.number_input("Number of Active Jhula Machines", min_value=1, max_value=10, value=2)
-    active_hours = st.number_input("Active Production Hours Per Shift", min_value=1, max_value=24, value=10)
-    fixed_labor_payroll = st.number_input("Fixed Labor Shift Payroll (₹)", min_value=0.0, value=6400.0)
-    variable_labor_per_ton = st.number_input("Per-Ton Variable Labor Payout (₹)", min_value=0.0, value=0.0)
+    active_jhulas = int(st.number_input("Number of Active Jhula Machines", min_value=1, max_value=10, value=2, step=1))
+    active_hours = float(st.number_input("Active Production Hours Per Shift", min_value=1.0, max_value=24.0, value=10.0, step=0.5))
+    fixed_labor_payroll = float(st.number_input("Fixed Labor Shift Payroll (₹)", min_value=0.0, value=6400.0))
+    variable_labor_per_ton = float(st.number_input("Per-Ton Variable Labor Payout (₹)", min_value=0.0, value=0.0))
 
 with col_p3:
-    monthly_factory_bills = st.number_input("Total Monthly Factory Bills (₹)", min_value=0.0, value=245000.0)
-    slab_pct_input = st.number_input("Factory Maintenance Fund Allocation (%)", min_value=0.0, max_value=100.0, value=35.0)
+    monthly_factory_bills = float(st.number_input("Total Monthly Factory Bills (₹)", min_value=0.0, value=245000.0))
+    slab_pct_input = float(st.number_input("Factory Maintenance Fund Allocation (%)", min_value=0.0, max_value=100.0, value=35.0))
     st.success(f"**Billing Rate Assigned:** ₹{billing_rate_per_ton:,.2f} / Ton")
 
 st.markdown("---")
 
 # ============================================================================
-# 3. OPTIONAL DYNAMIC MACHINE PRODUCTION COUNTER INPUT GRID (EXPLICIT LABELS)
+# 3. OPTIONAL PIECE COUNT OUTPUT BLOCK
 # ============================================================================
 st.subheader("🔢 Machine Output Entry Block (Optional)")
 st.markdown("*Leave these counts at 0 to view pure Break-Even Forecasting values.*")
@@ -83,35 +83,32 @@ actual_counts = []
 for idx in range(active_jhulas):
     col_selector = j_cols[idx % 5]
     with col_selector:
-        # Custom Formatted Match per machine
-        pcs = st.number_input(
+        pcs = int(st.number_input(
             f"Actual Production Per Hour (Jhula{idx + 1}) (Pieces)", 
             min_value=0, 
             value=0, 
+            step=1,
             key=f"jhula_{idx}"
-        )
+        ))
         actual_counts.append(pcs)
 
-# 🚀 THE CALIBRATED ENGINE MATH: Formulates total shift metrics safely from user inputs
-total_shift_pieces = sum(actual_counts) * active_hours
+total_hourly_pieces = sum(actual_counts)
+total_shift_pieces = float(total_hourly_pieces * active_hours)
 total_shift_tonnage = (total_shift_pieces * weight_kg) / 1000.0
 gross_shift_revenue = total_shift_tonnage * billing_rate_per_ton
 slab_factor = slab_pct_input / 100.0
 
-# Fixed: Activates simulation view card layers seamlessly if total items exceed zero
-is_simulation_mode = total_shift_pieces > 0
+is_simulation_mode = total_hourly_pieces > 0
 total_variable_labor_cost = total_shift_tonnage * variable_labor_per_ton
 
-# Evaluate model routing parameters cleanly
 has_slab = slab_pct_input > 0
 has_bills = monthly_factory_bills > 0
-
-# Core Model Formulations
+# Core Calculations Matrix
 maint_allocation_b = (monthly_factory_bills / 30.0) if has_bills else 0.0
 net_margin_ton_b = billing_rate_per_ton - variable_labor_per_ton
 min_ton_b = (maint_allocation_b + fixed_labor_payroll) / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
 min_pieces_b = (min_ton_b * 1000.0) / weight_kg if weight_kg > 0 else 0.0
-total_shift_runtime_units = active_jhulas * active_hours
+total_shift_runtime_units = float(active_jhulas * active_hours)
 min_rate_hr_b = min_pieces_b / total_shift_runtime_units if total_shift_runtime_units > 0 else 0.0
 net_profit_b = gross_shift_revenue - (maint_allocation_b + fixed_labor_payroll + total_variable_labor_cost)
 
@@ -140,6 +137,47 @@ else:
     model_color = "#fff2cc"
     border_color = "#d6b656"
 
+# ============================================================================
+# 4. LIVE SHIFT FINANCIAL PERFORMANCE VISUALIZATION SUMMARY
+# ============================================================================
+if is_simulation_mode:
+    st.subheader("💵 Live Shift Financial Performance Summary")
+    
+    if has_bills and has_slab:
+        sim_col_b, sim_col_d = st.columns(2)
+        with sim_col_b:
+            st.markdown("<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #595959; font-weight: bold;'>📊 Standard Model Performance (Col B)</div>", unsafe_allow_html=True)
+            st.write(f"**Gross Revenue:** ₹{gross_shift_revenue:,.2f}")
+            st.write(f"**Fixed Maintenance Cost:** ₹{maint_allocation_b:,.2f}")
+            st.metric("Net Shift Profit (Col B)", f"₹{net_profit_b:,.2f}")
+        with sim_col_d:
+            st.markdown("<div style='background-color: #e2efda; padding: 15px; border-radius: 8px; border-left: 5px solid #006100; font-weight: bold;'>⚡ Dynamic Slab Performance (Col D)</div>", unsafe_allow_html=True)
+            st.write(f"**Gross Revenue:** ₹{gross_shift_revenue:,.2f}")
+            st.write(f"**Slab Maintenance Cost:** ₹{maint_allocation_d:,.2f}")
+            st.metric("Net Shift Profit (Col D)", f"₹{net_profit_d:,.2f}")
+            
+    elif has_slab:
+        st.markdown(f"<div style='background-color: #e2efda; padding: 15px; border-radius: 8px; border-left: 5px solid #006100; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
+        f_col1, f_col2, f_col3 = st.columns(3)
+        f_col1.metric("Gross Revenue", f"₹{gross_shift_revenue:,.2f}")
+        f_col2.metric("Maint Overhead (Slab)", f"₹{maint_allocation_d:,.2f}")
+        f_col3.metric("Net Shift Profit/Loss", f"₹{net_profit_d:,.2f}")
+        
+    elif has_bills:
+        st.markdown(f"<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #595959; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
+        f_col1, f_col2, f_col3 = st.columns(3)
+        f_col1.metric("Gross Revenue", f"₹{gross_shift_revenue:,.2f}")
+        f_col2.metric("Maint Overhead (Flat)", f"₹{maint_allocation_b:,.2f}")
+        f_col3.metric("Net Shift Profit/Loss", f"₹{net_profit_b:,.2f}")
+        
+    else:
+        st.markdown(f"<div style='background-color: #fff2cc; padding: 15px; border-radius: 8px; border-left: 5px solid #d6b656; font-weight: bold;'>{active_model_desc}</div>", unsafe_allow_html=True)
+        f_col1, f_col2, f_col3 = st.columns(3)
+        f_col1.metric("Gross Revenue", f"₹{gross_shift_revenue:,.2f}")
+        f_col2.metric("Maint Overhead Cost", "₹0.00")
+        f_col3.metric("Net Shift Profit/Loss", f"₹{net_profit_payroll_only:,.2f}")
+        
+    st.markdown("---")
 # ============================================================================
 # 5. FORECASTING CAPACITY ENGINE BLOCK
 # ============================================================================
@@ -205,19 +243,12 @@ else:
 
 st.markdown("---")
 
-# ============================================================================
-# 7. AUTOMATED MATHEMATICAL FORMULAS EXPANDER (DYNAMIC ALL-ACTIVE PROFILES)
-# ============================================================================
 with st.expander("📝 View Active Costing Hierarchy Equations & Operational Formulas"):
-    
-    # Global Production Constants Block (Always Visible)
     st.markdown("### 🏭 Global Production Equations")
     st.latex(r"\text{Total Pieces Processed} = \sum (\text{Actual Pieces Per Jhula}) \times \text{Active Production Hours}")
     st.latex(r"\text{Total Tonnage (MT)} = \frac{\text{Total Pieces} \times \text{Casting Weight (Kg)}}{1000}")
     st.latex(r"\text{Gross Revenue (₹)} = \text{Total Tonnage} \times \text{Billing Rate Per Ton}")
     st.markdown("---")
-    
-    # Condition: If Flat Bills are configured, expose Column B Math
     if has_bills:
         st.markdown("### 📊 Standard Flat Bills Model Formulas (Column B)")
         st.latex(r"\text{Flat Daily Overhead (₹)} = \frac{\text{Total Monthly Factory Bills}}{30}")
@@ -226,8 +257,6 @@ with st.expander("📝 View Active Costing Hierarchy Equations & Operational For
         st.latex(r"\text{Pieces Required (Col B)} = \frac{\text{Break Even Tonnage (Col B)} \times 1000}{\text{Casting Weight (Kg)}}")
         st.latex(r"\text{Target Floor Pace (Col B)} = \frac{\text{Pieces Required (Col B)}}{\text{Active Jhulas} \times \text{Active Production Hours}}")
         st.markdown("---")
-        
-    # Condition: If Slab Allocation percentage is configured, expose Column D Math
     if has_slab:
         st.markdown("### ⚡ Dynamic Variable Slab Model Formulas (Column D)")
         st.latex(r"\text{Variable Maintenance Cost (₹)} = \text{Gross Revenue} \times \text{Allocation \%}")
@@ -235,12 +264,3 @@ with st.expander("📝 View Active Costing Hierarchy Equations & Operational For
         st.latex(r"\text{Break Even Tonnage (Col D)} = \frac{\text{Fixed Labor Shift Payroll}}{\text{Net Margin / Ton (Col D)}}")
         st.latex(r"\text{Pieces Required (Col D)} = \frac{\text{Break Even Tonnage (Col D)} \times 1000}{\text{Casting Weight (Kg)}}")
         st.latex(r"\text{Target Floor Pace (Col D)} = \frac{\text{Pieces Required (Col D)}}{\text{Active Jhulas} \times \text{Active Production Hours}}")
-        st.markdown("---")
-        
-    # Condition: Fallback State if neither are configured
-    if not has_bills and not has_slab:
-        st.markdown("### ⚠️ Staff Payroll Only Model Formulas")
-        st.latex(r"\text{Net Margin / Ton} = \text{Billing Rate} - \text{Variable Labor Per Ton}")
-        st.latex(r"\text{Break Even Tonnage} = \frac{\text{Fixed Labor Shift Payroll}}{\text{Net Margin / Ton}}")
-        st.latex(r"\text{Pieces Required} = \frac{\text{Break Even Tonnage} \times 1000}{\text{Casting Weight (Kg)}}")
-        st.latex(r"\text{Target Floor Pace} = \frac{\text{Pieces Required}}{\text{Active Jhulas} \times \text{Active Production Hours}}")
