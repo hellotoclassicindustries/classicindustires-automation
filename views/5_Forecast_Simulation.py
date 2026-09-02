@@ -3,7 +3,7 @@ import pandas as pd
 from supabase import create_client
 
 # ============================================================================
-# 1. SECURE DATABASE CONNECTION INTEGRATION
+# 1. SECURE DATABASE CONNECTION INTEGRATION --> THIS CODE was to Make Rate editable
 # ============================================================================
 @st.cache_resource
 def init_supabase_connection():
