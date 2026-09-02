@@ -39,7 +39,7 @@ with st.sidebar:
             st.rerun()
     else:
         st.warning("🔑 Restricted Access Panel")
-                with st.form("Internal Personnel Authentication Log"):
+        with st.form("Internal Personnel Authentication Log"):
             input_user = st.text_input("Username:")
             input_pass = st.text_input("Password:", type="password")
             submit_login = st.form_submit_button("Unlock Secure Sheets")
