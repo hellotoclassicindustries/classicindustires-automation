@@ -39,13 +39,20 @@ with st.sidebar:
             st.rerun()
     else:
         st.warning("🔑 Restricted Access Panel")
-        with st.form("Internal Personnel Authentication Log"):
+                with st.form("Internal Personnel Authentication Log"):
             input_user = st.text_input("Username:")
             input_pass = st.text_input("Password:", type="password")
             submit_login = st.form_submit_button("Unlock Secure Sheets")
             
             if submit_login:
-                if input_user == st.secrets["DASHBOARD_USER"] and input_pass == st.secrets["DASHBOARD_PASS"]:
+                # 🚀 THE FIX: Force inputs to lower-case and strip out blank spaces instantly
+                clean_input_user = str(input_user).strip().lower()
+                clean_input_pass = str(input_pass).strip()
+                
+                clean_expected_user = str(st.secrets["DASHBOARD_USER"]).strip().lower()
+                clean_expected_pass = str(st.secrets["DASHBOARD_PASS"]).strip()
+                
+                if clean_input_user == clean_expected_user and clean_input_pass == clean_expected_pass:
                     st.session_state.authenticated = True
                     st.success("Access Granted!")
                     st.rerun()
