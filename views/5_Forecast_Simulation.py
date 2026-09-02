@@ -29,7 +29,7 @@ def fetch_master_catalog():
         return pd.DataFrame()
 
 # ============================================================================
-# 2. DATA INGESTION & UI PARAMETER SELECTOR
+# 2. EXECUTIVE PARSER AND PROFILE MATCHING DROPDOWN
 # ============================================================================
 catalog_df = fetch_master_catalog()
 
@@ -53,7 +53,8 @@ with col_p1:
     part_meta = matched_df.iloc[0].to_dict()
     
     weight_kg = float(part_meta["weight_kg"])
-    # Pull original base rate to act as our baseline default pointer
+    
+    # Read the live baseline rate from Supabase to provide the starting point
     base_billing_rate = float(part_meta.get("billing_rate_per_ton", 0.0))
     if base_billing_rate <= 0:
         base_billing_rate = float(part_meta.get("rate_per_tons", 2650.0))
@@ -72,14 +73,13 @@ with col_p3:
     monthly_factory_bills = float(st.number_input("Total Monthly Factory Bills (₹)", min_value=0.0, value=245000.0))
     slab_pct_input = float(st.number_input("Factory Maintenance Fund Allocation (%)", min_value=0.0, max_value=100.0, value=35.0))
     
-    # 🚀 THE OVERRIDE FIX: Custom feeding input box initialized with the true database base value
-    billing_rate_per_ton = float(st.number_input("Override Billing Rate / Ton (₹)", min_value=0.0, value=base_billing_rate, step=50.0))
-    st.success(f"**Active Costing Rate:** ₹{billing_rate_per_ton:,.2f} / Ton")
+    # 🚀 THE OVERRIDE SOLUTON: An active input field that lets you change the rate dynamically!
+    billing_rate_per_ton = float(st.number_input("Override / Active Costing Rate per Ton (₹)", min_value=0.0, value=base_billing_rate, step=50.0))
 
 st.markdown("---")
 
 # ============================================================================
-# 3. OPTIONAL PIECE COUNT OUTPUT BLOCK (EXPLICIT JHULA HOURLY INPUT LABELS)
+# 3. OPTIONAL DYNAMIC MACHINE COUNTERS INPUT MATRIX
 # ============================================================================
 st.subheader("🔢 Machine Output Entry Block (Optional)")
 st.markdown("*Leave these counts at 0 to view pure Break-Even Forecasting values.*")
@@ -90,6 +90,7 @@ actual_counts = []
 for idx in range(active_jhulas):
     col_selector = j_cols[idx % 5]
     with col_selector:
+        # Enforces clean per-hour input parameters matching your layout goals
         pcs = int(st.number_input(
             f"Actual Production Per Hour (Jhula{idx + 1}) (Pieces)", 
             min_value=0, 
@@ -99,7 +100,7 @@ for idx in range(active_jhulas):
         ))
         actual_counts.append(pcs)
 
-# RE-CALIBRATED SYSTEM MATHEMATICS
+# RE-CALIBRATED SYSTEM MATHEMATICS: Instantly recalculates using your custom rate
 total_hourly_pieces = sum(actual_counts)
 total_shift_pieces = float(total_hourly_pieces * active_hours)
 total_shift_tonnage = (total_shift_pieces * weight_kg) / 1000.0
@@ -111,7 +112,7 @@ total_variable_labor_cost = total_shift_tonnage * variable_labor_per_ton
 
 has_slab = slab_pct_input > 0
 has_bills = monthly_factory_bills > 0
-# Core Calculations Engine
+# Core Calculations Matrix
 maint_allocation_b = (monthly_factory_bills / 30.0) if has_bills else 0.0
 net_margin_ton_b = billing_rate_per_ton - variable_labor_per_ton
 min_ton_b = (maint_allocation_b + fixed_labor_payroll) / net_margin_ton_b if net_margin_ton_b > 0 else 0.0
@@ -146,7 +147,7 @@ else:
     border_color = "#d6b656"
 
 # ============================================================================
-# PERFORMANCE FINANCIALS VISUALIZATION VIEW BLOCK
+# 4. LIVE SHIFT FINANCIAL PERFORMANCE VIEW SUMMARY
 # ============================================================================
 if is_simulation_mode:
     st.subheader("💵 Live Shift Financial Performance Summary")
@@ -185,7 +186,7 @@ if is_simulation_mode:
         f_col1, f_col2, f_col3 = st.columns(3)
         f_col1.metric("Gross Revenue", f"₹{gross_shift_revenue:,.2f}")
         f_col2.metric("Maint Overhead Cost", "₹0.00")
-        st.metric("Net Shift Profit/Loss", f"₹{net_profit_payroll_only:,.2f}")
+        f_col3.metric("Net Shift Profit/Loss", f"₹{net_profit_payroll_only:,.2f}")
         
     st.markdown("---")
 # ============================================================================
