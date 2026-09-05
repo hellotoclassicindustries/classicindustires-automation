@@ -22,9 +22,10 @@ stock_page = st.Page("views/2_Stock_Master.py", title="Stock Master Dashboard", 
 ledger_page = st.Page("views/3_Daily_Ledger.py", title="Daily Transaction Register", icon="📝")
 forecast_page = st.Page("views/5_Forecast_Simulation.py", title="Forecast Simulation View", icon="🔮")
 guide_page = st.Page("views/4_System_Guide.py", title="System User Guide", icon="📘")
+page_invoice = st.Page("views/6_Invoice_Generator.py", title="Invoice Generator Node", icon="🧾")
 
 # TRUTH PATTERN: Register all pages cleanly in the navigation loop
-pages = [about_page, stock_page, ledger_page, forecast_page, guide_page]
+pages = [about_page, stock_page, ledger_page, forecast_page, page_invoice, guide_page]
 
 # Run Core Navigation Controller
 pg = st.navigation(pages)
