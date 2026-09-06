@@ -63,7 +63,7 @@ with col_i2:
     is_filtered_run = selected_display != "ALL RUNNABLE COMPONENTS"
 
 st.markdown("---")
-st.subheader("🏢 Step 1: Corporate Entity Address Profiles")
+st.subheader("🏭 Step 1: Corporate Entity Address Profiles")
 col_s1, col_s2 = st.columns(2)
 
 with col_s1:
@@ -80,36 +80,47 @@ with col_s1:
 with col_s2:
     st.markdown("**🏢 Buyer / Client Profile Auto-Loader**")
     buyer_only_df = corporate_df[corporate_df["profile_type"].str.lower() != "owner"]
+    
     if not buyer_only_df.empty:
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", list(buyer_only_df["company_name"].unique()))
         c_row = buyer_only_df[buyer_only_df["company_name"] == selected_client_name].iloc[0].to_dict()
-        bill_name = st.text_input("Buyer Name", str(c_row.get("company_name", "")))
-        bill_gstin = st.text_input("Buyer GSTIN", str(c_row.get("gstin", "")))
-        bill_address = st.text_area("Buyer Billing Address", str(c_row.get("billing_address", "")))
-        bill_person = st.text_input("Attn / Contact Person", str(c_row.get("contact_person", "Operations Head")))
-        bill_no = st.text_input("Buyer Contact Number", str(c_row.get("contact_number", "")))
-        raw_hsn_string = str(c_row.get("hsn_number", "998349"))
+        
+        default_name = str(c_row.get("company_name", ""))
+        default_gstin = str(c_row.get("gstin", ""))
+        default_addr = str(c_row.get("billing_address", ""))
+        default_person = str(c_row.get("contact_person", "Operations Head"))
+        default_no = str(c_row.get("contact_number", ""))
+        default_hsn = str(c_row.get("hsn_number", "998349"))
         base_pos = f"{str(c_row.get('state_code','00')).zfill(2)}-{str(c_row.get('state_name','UNKNOWN')).upper()}"
     else:
-        bill_name = st.text_input("Buyer Name", "REVENT METALCAST LIMITED")
-        bill_gstin = st.text_input("Buyer GSTIN", "08AAACA8504G2ZW")
-        bill_address = st.text_area("Buyer Billing Address", "SPA-1195, RIICO Industrial Area, Bhiwadi, Rajasthan")
-        bill_person = st.text_input("Attn", "Contact_Person")
-        bill_no = st.text_input("Buyer Phone", "9999999999")
-        raw_hsn_string = "998349"
+        default_name = "REVENT METALCAST LIMITED"
+        default_gstin = "08AAACA8504G2ZW"
+        default_addr = "SPA-1195, RIICO Industrial Area, Bhiwadi, Rajasthan"
+        default_person = "Contact_Person"
+        default_no = "9999999999"
+        default_hsn = "998349"
         base_pos = "08-RAJASTHAN"
+
+    bill_name = st.text_input("Buyer Name", default_name)
+    bill_gstin = st.text_input("Buyer GSTIN", default_gstin)
+    bill_address = st.text_area("Buyer Billing Address", default_addr)
+    bill_person = st.text_input("Attn / Contact Person", default_person)
+    bill_no = st.text_input("Buyer Contact Number", default_no)
+    
+    # 🚀 FIXED & MOVED: Placed cleanly outside conditional constraints so it renders flawlessly at the bottom of Column 2
+    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Comma Separated Override)", value=default_hsn)
 st.markdown("<br>", unsafe_allow_html=True)
 st.subheader("🚛 Step 2: Logistic Matrix & Delivery Directives")
 col_s3, col_s4 = st.columns(2)
 
 with col_s3:
-    same_as_billing = st.checkbox("Shipping Destination matches Billing Profile Address", value=True)
-    ship_addr_override = st.text_area("Consignee Delivery Location", value=bill_address if same_as_billing else bill_address)
+    same_as_billing = st.checkbox("Shipping Destination matches Profile Billing Address", value=True)
+    ship_addr_override = st.text_area("Consignee Delivery Target Site Location", value=bill_address if same_as_billing else bill_address)
     place_of_supply = st.text_input("Place of Supply State Code Display", value=base_pos)
 
 with col_s4:
-    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Comma Separated Override)", value=raw_hsn_string)
-    invoice_date_input = st.date_input("Invoice Date", today)
+    invoice_date_input = st.date_input("Invoice Operational Date", today)
+    due_date_input = st.date_input("Payment Due Date Target", today + timedelta(days=30))
     invoice_serial_no = st.text_input("Invoice Serial Code Number", f"INV-{datetime.now().strftime('%M%S')}")
 
 st.markdown("---")
@@ -120,7 +131,6 @@ hsn_summary_map = {}
 
 parsed_hsn_list = [x.strip() for x in invoice_hsn_input.split(",") if x.strip()]
 
-# 🚀 THE CRITICAL AXIS FIX: Declared idx via enumerate to eliminate compilation errors
 for idx, record in catalog_df.iterrows():
     p_num = str(record["part_number"])
     if is_filtered_run and p_num.upper() not in selected_display.upper(): continue
@@ -131,7 +141,7 @@ for idx, record in catalog_df.iterrows():
     p_rate = float(record.get("rate_per_ton", 2650.0))
     if p_rate <= 0: p_rate = 2650.00 if "933" in p_num else 3300.00
     
-    # Priority extraction rule logic handles fallbacks cleanly
+    # Priority lookup strategy mapping
     hsn_code = parsed_hsn_list[idx] if (len(parsed_hsn_list) > 0 and idx < len(parsed_hsn_list)) else str(record.get("hsn_sac", "998349")).strip()
     
     total_wt_mt = (sim_qty * p_weight) / 1000.0
@@ -219,8 +229,8 @@ def generate_invoice_pdf_file(data):
         
     start_tot_idx = len(table_content)
     table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{total_invoice_pieces}</b>", cell_style), Paragraph("", cell_style), Paragraph(f"<b>{data['total_invoice_weight_mt']:.5f}</b>", cell_style), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_style)])
-    table_content.append(["", "", "", "", "", "", Paragraph("<b>Taxable Value:</b>", cell_style), Paragraph(f"{data['taxable_amount']:,.2f}", cell_style)])
-    table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"{data['igst']:,.2f}", cell_style)])
+    table_content.append(["", "", "", "", "", "", Paragraph("<b>Taxable Value:</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style)])
+    table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
     
     billing_table = Table(table_content, colWidths=[30, 140, 50, 45, 45, 60, 50, 70])
@@ -236,9 +246,9 @@ def generate_invoice_pdf_file(data):
     hsn_table = Table(hsn_content, colWidths=[100, 100, 80, 130, 130])
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(hsn_table)
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 10))
     
-    footer_table = Table([[Paragraph("<b>Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[290, 250])
+    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[290, 250])
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
     
@@ -247,6 +257,18 @@ def generate_invoice_pdf_file(data):
 
 st.markdown("---")
 st.subheader("📥 Step 4: Invoice Assembly Panel")
+
+# Re-mapped variable references to point directly to invoice_payload
+invoice_payload = {
+    "invoice_no": str(invoice_serial_no), "start_date": start_date.strftime("%d-%b-%Y"), "end_date": end_date.strftime("%d-%b-%Y"),
+    "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_tagline": str(src_tagline), "src_address": str(src_address),
+    "src_gstin": str(src_gstin), "src_mobile": str(src_mobile), "src_email": str(src_email), "bill_name": str(bill_name),
+    "bill_contact_person": str(bill_person), "bill_address": str(bill_address), "bill_gstin": str(bill_gstin),
+    "bill_mobile": str(bill_no), "ship_address": str(ship_addr_override), "line_items": line_items_payload,
+    "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
+    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map,
+    "total_invoice_weight_mt": total_invoice_weight_mt
+}
 
 if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_container_width=True):
     try:
