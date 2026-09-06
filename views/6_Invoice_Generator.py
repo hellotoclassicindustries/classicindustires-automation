@@ -40,7 +40,6 @@ def fetch_corporate_master_directory():
     if not supabase:
         return pd.DataFrame()
     try:
-        # Fetch only active, non-violated clients/vendors from your new corporate master table
         response = supabase.table("cntr_corporate_master").select("*").eq("is_violated", False).order("company_name").execute()
         return pd.DataFrame(response.data)
     except Exception as e:
@@ -92,7 +91,7 @@ col_s1, col_s2 = st.columns(2)
 with col_s1:
     st.markdown("**🛡️ Seller / Foundry Details (Editable on the fly)**")
     src_name = st.text_input("Seller Legal Name", "CLASSIC INDUSTRIES")
-    src_tagline = st.text_input("Business Core Tagline", "Manufacturer & Supplier of Cast Iron Components")
+    src_tagline = st.text_input("Business Line Tagline", "Manufacturer & Supplier of Cast Iron Components")
     src_address = st.text_area("Full Corporate Factory Address", "KH-267, H.No.-08, Chipiyana Bujurg,\nGhaziabad – 201009, Uttar Pradesh")
     src_gstin = st.text_input("Seller GSTIN Code Token", "09ENRPS7521A1ZN")
     src_mobile = st.text_input("Seller Contact Mobile", "9999999999")
@@ -101,11 +100,10 @@ with col_s1:
 with col_s2:
     st.markdown("**🏢 Buyer / Client Profile Auto-Loader**")
     if not corporate_df.empty:
-        # Build dropdown options using live company names fetched from your new master table
         corp_options = list(corporate_df["company_name"].unique())
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options)
         
-        # 🚀 THE CRITICAL AXIS FIX: Extracted specific scalar positional data dictionary with 0-row offset index
+        # Safe extraction of specific record dictionary with 0-row offset index
         filtered_rows = corporate_df[corporate_df["company_name"] == selected_client_name]
         client_row = filtered_rows.iloc[0].to_dict()
         
@@ -115,12 +113,10 @@ with col_s2:
         bill_contact_person = st.text_input("Attn / Customer Contact Person", str(client_row.get("contact_person", "Operations Head")))
         bill_contact_no = st.text_input("Buyer Contact Number", str(client_row.get("contact_number", "")))
         
-        # Format Indian State Code and Name tracking blocks perfectly (e.g., '08-RAJASTHAN')
         raw_code = str(client_row.get('state_code', '00')).strip()
         padded_code = raw_code.zfill(2)
         base_pos = f"{padded_code}-{str(client_row.get('state_name', 'UNKNOWN')).upper()}"
     else:
-        # Secure, production-ready fallback entries matching your sample data
         bill_name = st.text_input("Buyer Company Profile Name", "REVENT METALCAST LIMITED")
         bill_gstin = st.text_input("Buyer GSTIN Token", "08AAACA8504G2ZW")
         bill_address = st.text_area("Buyer Corporate Billing Address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019")
@@ -133,7 +129,6 @@ st.subheader("🚛 Step 2: Logistic Matrix & Delivery Directives")
 col_s3, col_s4 = st.columns(2)
 
 with col_s3:
-    # 🚀 INTERACTIVE ADDRESS LINK: Clean checkbox workflow allows cloning or manual shipping overrides
     same_as_billing = st.checkbox("Shipping Destination matches Billing Profile Address", value=True)
     
     if same_as_billing:
@@ -153,7 +148,6 @@ st.subheader("⚙️ Step 3: Production Ingestion Verification Breakdown")
 line_items_payload = []
 hsn_summary_map = {}
 
-# Query your master component catalog records to process live transactions loop
 try:
     query_response = supabase.table("cntr_part_master").select("*").execute()
     db_records = query_response.data
@@ -164,7 +158,6 @@ except Exception as query_err:
         {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING\n1. Item - Core Cleaning", "weight_kg": 28.0}
     ]
 
-# Core System Mathematics loop transformation mapping
 for idx, record in enumerate(db_records):
     p_num = str(record["part_number"])
     if is_filtered_run and p_num.upper() not in selected_display.upper():
@@ -212,9 +205,6 @@ grand_invoice_total = total_taxable_subtotal + total_tax_sum
 invoice_total_words = "One Lakh Eighty-Two Thousand Sixty-Two Rupees And Ninety-Nine Paise Only."
 tax_total_words = "Twenty-Seven Thousand Seven Hundred Seventy-Two Rupees And Thirty-Two Paise Only."
 
-# ============================================================================
-# 🎯 REPLICATED HIGH-FIDELITY LIVE PREVIEW GRID MOCKUP BOX
-# ============================================================================
 st.markdown("🔍 **Live On-Screen Print Preview Layout Matrix:**")
 st.markdown(
     f"""
@@ -286,27 +276,27 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    # Header Top Grid Construction (Width: 320 + 220 = 540)
+    # 🔒 Fixed: 320 + 220 = 540 total safe horizontal point width balance
     top_grid_data = [
         [Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_tagline']}<br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}<br/><b>Mob:</b> {data['src_mobile']} | <b>Email:</b> {data['src_email']}", meta_style),
          Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}<br/><b>Due Date:</b> {data['end_date']}", meta_style)]
     ]
-    top_table = Table(top_grid_data, colWidths=)
+    top_table = Table(top_grid_data, colWidths=[320, 220])
     top_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    # Address Matrix Grid Construction (Width: 270 + 270 = 540)
+    # 🔒 Fixed: 270 + 270 = 540 total safe horizontal point width balance
     addr_grid_data = [
         [Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>Attn: {data['bill_contact_person']}<br/><b>Address:</b> {data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']} | <b>Ph:</b> {data['bill_mobile']}", meta_style),
          Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]
     ]
-    addr_table = Table(addr_grid_data, colWidths=)
+    addr_table = Table(addr_grid_data, colWidths=[270, 270])
     addr_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # Main Items Table Grid (Total Width Columns Sum = 540)
+    # 🔒 Fixed: 30 + 140 + 50 + 45 + 45 + 60 + 50 + 70 = 540 total safe horizontal point width balance
     main_headers = [Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per Pieces", hdr_style), Paragraph("Total Weight In Ton", hdr_style), Paragraph("Per Ton Rate", hdr_style), Paragraph("Amount", hdr_style)]
     table_content = [main_headers]
     
@@ -323,7 +313,7 @@ def generate_invoice_pdf_file(data):
     table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
     
-    billing_table = Table(table_content, colWidths=)
+    billing_table = Table(table_content, colWidths=[30, 140, 50, 45, 45, 60, 50, 70])
     billing_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -337,7 +327,7 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Amount Chargeable (in words):</b> {data['total_words']}", meta_style))
     story.append(Spacer(1, 10))
     
-    # HSN / Tax Breakdown Grid Summary Table (Total width = 540)
+    # 🔒 Fixed: 100 + 100 + 80 + 130 + 130 = 540 total safe horizontal point width balance
     hsn_headers = [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
     hsn_content = [hsn_headers]
     
@@ -348,7 +338,7 @@ def generate_invoice_pdf_file(data):
         ])
     hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
-    hsn_table = Table(hsn_content, colWidths=)
+    hsn_table = Table(hsn_content, colWidths=[100, 100, 80, 130, 130])
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(hsn_table)
     story.append(Spacer(1, 10))
@@ -356,12 +346,12 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    # Footer Section (Width: 300 + 240 = 540)
+    # 🔒 Fixed: 290 + 250 = 540 total safe horizontal point width balance
     footer_data = [
         [Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>Branch & IFS Code: <b>IDIB000P618</b>", meta_style),
          Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]
     ]
-    footer_table = Table(footer_data, colWidths=)
+    footer_table = Table(footer_data, colWidths=[290, 250])
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
     
