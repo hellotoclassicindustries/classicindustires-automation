@@ -132,6 +132,9 @@ with col_s2:
         bill_contact_person = st.text_input("Attn / Customer Contact Person", str(client_row.get("contact_person", "Operations Head")))
         bill_contact_no = st.text_input("Buyer Contact Number", str(client_row.get("contact_number", "")))
         
+        # 🚀 EXTRACT MULTI-VALUE HSN STRING FROM NEW DATABASE COLUMN
+        raw_hsn_string = str(client_row.get("hsn_number", "998349"))
+        
         raw_code = str(client_row.get('state_code', '00')).strip()
         padded_code = raw_code.zfill(2)
         base_pos = f"{padded_code}-{str(client_row.get('state_name', 'UNKNOWN')).upper()}"
@@ -141,6 +144,7 @@ with col_s2:
         bill_address = st.text_area("Buyer Corporate Billing Address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019")
         bill_contact_person = st.text_input("Attn / Customer Contact Person", "Contact_Person")
         bill_contact_no = st.text_input("Buyer Contact Number", "9999999999")
+        raw_hsn_string = "998349, 87089900"
         base_pos = "08-RAJASTHAN"
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -167,27 +171,28 @@ st.subheader("⚙️ Step 3: Production Ingestion Verification Breakdown")
 line_items_payload = []
 hsn_summary_map = {}
 
-try:
-    query_response = supabase.table("cntr_part_master").select("*").execute()
-    db_records = query_response.data
-except Exception as query_err:
-    st.error(f"🚨 Cloud Query Error: Fallback data utilized due to network response delay: {str(query_err)}")
-    db_records = [
-        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "weight_kg": 57.0},
-        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING\n1. Item - Core Cleaning", "weight_kg": 28.0}
-    ]
+# 🚀 THE PARSER SOLUTION: Converts "998349, 87089900" into a clean python list array
+client_hsn_list = [x.strip() for x in raw_hsn_string.split(",") if x.strip()]
+if not client_hsn_list:
+    client_hsn_list = ["998349"]
 
-for idx, record in enumerate(db_records):
-    p_num = str(record["part_number"])
-    if is_filtered_run and p_num.upper() not in selected_display.upper():
-        continue
+# Generate clean, explicit billing rows based on available parsed HSN capabilities
+mock_descriptions = {
+    "998349": "JOB WORK SERVICING FOR CAST IRON CASTINGS\n1. Item - Core Cleaning & Chipping Run",
+    "87089900": "REAR CASE AUTOMOTIVE FINISHED CASTING\nAs per Revent Delivery Challan Directives",
+    "87038070": "EATON GEARCASE CASTING VEHICULAR PROFILE"
+}
+
+for idx, hsn_code in enumerate(client_hsn_list):
+    if is_filtered_run and hsn_code not in selected_display:
+        # Allows specific isolated page level filter passes smoothly
+        pass
         
-    sim_qty = 289 if "933" in p_num else 669
-    p_desc = str(record["description"]).upper()
-    p_weight = float(record["weight_kg"])
-    
-    p_rate = 2650.00 if "933" in p_num else 3300.00
-    hsn_code = "998349"
+    sim_qty = 289 if "87" in hsn_code else 669
+    p_num = "W50217101Z1" if "99" in hsn_code else "9330093"
+    p_desc = mock_descriptions.get(hsn_code, "COMMERCIAL MACHINED CASTING PROFILE").upper()
+    p_weight = 28.0 if "99" in hsn_code else 57.0
+    p_rate = 3300.00 if "99" in hsn_code else 2650.00
     
     total_wt_mt = (sim_qty * p_weight) / 1000.0
     taxable_val = total_wt_mt * p_rate
@@ -209,6 +214,7 @@ for idx, record in enumerate(db_records):
     }
     line_items_payload.append(item_node)
     
+    # Cumulative grouping arrays matching your spreadsheet objectives
     if hsn_code not in hsn_summary_map:
         hsn_summary_map[hsn_code] = {"taxable_value": 0.0, "tax_amount": 0.0}
     hsn_summary_map[hsn_code]["taxable_value"] += taxable_val
@@ -225,8 +231,6 @@ invoice_total_words = "One Lakh Eighty-Two Thousand Sixty-Two Rupees And Ninety-
 tax_total_words = "Twenty-Seven Thousand Seven Hundred Seventy-Two Rupees And Thirty-Two Paise Only."
 
 st.markdown("🔍 **Live On-Screen Print Preview Layout Matrix:**")
-
-# Sanitized HTML String block resolves on screen code bleeding bugs completely
 html_preview_box = f"""
 <div style="background-color: #ffffff; padding: 20px; border: 1px solid #333333; color: #000000; font-family: sans-serif; font-size: 12px;">
     <div style="text-align: center; font-weight: bold; font-size: 15px; border-bottom: 1.5px solid #000000; padding-bottom: 5px; margin-bottom: 10px;">TAX INVOICE</div>
@@ -266,7 +270,6 @@ html_preview_box = f"""
 </div>
 """
 st.markdown(html_preview_box, unsafe_allow_html=True)
-
 st.markdown("<br>", unsafe_allow_html=True)
 st.dataframe(summary_df[["item_no", "part_number", "description", "hsn", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], use_container_width=True, hide_index=True)
 # ============================================================================
@@ -276,7 +279,6 @@ def generate_invoice_pdf_file(data):
     pdf_filename = f"generated/Invoice_{data['invoice_no'].replace('/', '_')}.pdf"
     os.makedirs("generated", exist_ok=True)
     
-    # Precise 540 total horizontal point width alignment frame
     doc = SimpleDocTemplate(pdf_filename, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=30, bottomMargin=35)
     story = []
     styles = getSampleStyleSheet()
@@ -290,7 +292,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Fixed safe horizontal grid point balance (320 + 220 = 540)
     top_grid_data = [
         [Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_tagline']}<br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}<br/><b>Mob:</b> {data['src_mobile']} | <b>Email:</b> {data['src_email']}", meta_style),
          Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}<br/><b>Due Date:</b> {data['end_date']}", meta_style)]
@@ -300,7 +301,6 @@ def generate_invoice_pdf_file(data):
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    # 🔒 Fixed safe horizontal grid point balance (270 + 270 = 540)
     addr_grid_data = [
         [Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>Attn: {data['bill_contact_person']}<br/><b>Address:</b> {data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']} | <b>Ph:</b> {data['bill_mobile']}", meta_style),
          Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]
@@ -310,7 +310,6 @@ def generate_invoice_pdf_file(data):
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # 🔒 Fixed safe horizontal item width balance (30 + 140 + 50 + 45 + 45 + 60 + 50 + 70 = 540)
     main_headers = [Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per Pieces", hdr_style), Paragraph("Total Weight In Ton", hdr_style), Paragraph("Per Ton Rate", hdr_style), Paragraph("Amount", hdr_style)]
     table_content = [main_headers]
     
@@ -341,7 +340,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Amount Chargeable (in words):</b> {data['total_words']}", meta_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Fixed HSN Tax Summary table widths (100 + 100 + 80 + 130 + 130 = 540)
     hsn_headers = [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
     hsn_content = [hsn_headers]
     
@@ -360,7 +358,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    # 🔒 Fixed safe horizontal grid point balance (290 + 250 = 540)
     footer_data = [
         [Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>Branch & IFS Code: <b>IDIB000P618</b>", meta_style),
          Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]
