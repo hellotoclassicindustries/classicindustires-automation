@@ -103,7 +103,6 @@ with col_s2:
         corp_options = list(corporate_df["company_name"].unique())
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options)
         
-        # Safe extraction of specific record dictionary with 0-row offset index
         filtered_rows = corporate_df[corporate_df["company_name"] == selected_client_name]
         client_row = filtered_rows.iloc[0].to_dict()
         
@@ -205,53 +204,49 @@ grand_invoice_total = total_taxable_subtotal + total_tax_sum
 invoice_total_words = "One Lakh Eighty-Two Thousand Sixty-Two Rupees And Ninety-Nine Paise Only."
 tax_total_words = "Twenty-Seven Thousand Seven Hundred Seventy-Two Rupees And Thirty-Two Paise Only."
 
+# 🚀 THE SCREEN PREVIEW FIX: Clean HTML string blocks with correctly escaped multi-row text boxes
 st.markdown("🔍 **Live On-Screen Print Preview Layout Matrix:**")
-st.markdown(
-    f"""
-    <div style='background-color: #ffffff; padding: 25px; border: 1px solid #444444; border-radius: 4px; color: #000000; font-family: sans-serif; font-size: 13px; line-height: 1.4;'>
-        <div style='text-align: center; font-weight: bold; font-size: 16px; border-bottom: 1.5px solid #000000; padding-bottom: 5px; margin-bottom: 10px;'>TAX INVOICE</div>
-        
-        <table style='width: 100%; border-collapse: collapse; border: 1px solid #000000;'>
-            <tr>
-                <td style='width: 50%; border: 1px solid #000000; padding: 8px; vertical-align: top;'>
-                    <h3 style='margin:0 0 5px 0; color: #002b49;'>{src_name}</h3>
-                    <small style='font-weight: bold; color: #444444;'>{src_tagline}</small><br/>
-                    <span style='white-space: pre-line;'>{src_address}</span><br/>
-                    <b>GSTIN/UIN:</b> {src_gstin}<br/>
-                    <b>Mob:</b> {src_mobile} | <b>Email:</b> {src_email}
-                </td>
-                <td style='width: 50%; border: 1px solid #000000; padding: 8px; vertical-align: top;'>
-                    <b>Invoice No:</b> {invoice_serial_no}<br/>
-                    <b>Dated:</b> {invoice_date_input.strftime('%d-%b-%Y')}<br/>
-                    <b>Place of Supply:</b> {place_of_supply}<br/>
-                    <b>Due Date:</b> {due_date_input.strftime('%d-%b-%Y')}<br/>
-                    <b>Vehicle No:</b> [Not Required]
-                </td>
-            </tr>
-            <tr>
-                <td style='border: 1px solid #000000; padding: 8px; vertical-align: top; background-color: #fcfcfc;'>
-                    <span style='color: #555555; font-weight: bold; font-size: 11px;'>BUYER (BILL TO)</span><br/>
-                    <strong>{bill_name}</strong><br/>
-                    Attn: {bill_contact_person}<br/>
-                    <span style='white-space: pre-line;'>{bill_address}</span><br/>
-                    <b>GSTIN/UIN:</b> {bill_gstin} | <b>Ph:</b> {bill_contact_no}
-                </td>
-                <td style='border: 1px solid #000000; padding: 8px; vertical-align: top; background-color: #f6f9f5;'>
-                    <span style='color: #006100; font-weight: bold; font-size: 11px;'>CONSIGNEE (SHIP TO)</span><br/>
-                    <strong>{bill_name}</strong><br/>
-                    <span style='white-space: pre-line;'>{ship_addr_override}</span>
-                </td>
-            </tr>
-        </table>
-        
-        <div style='background-color: #eaeaea; padding: 8px; margin-top: 10px; font-weight: bold; border: 1px solid #000000; display: flex; justify-content: space-between;'>
-            <span>Estimated Shipment Weight: {total_invoice_weight_mt:.3f} MT</span>
-            <span>Grand Total: Rs. {grand_invoice_total:,.2f}</span>
+
+# Replaced nested raw styling selectors to prevent Streamlit text parser breaks
+html_preview_box = f"""
+<div style="background-color: #ffffff; padding: 20px; border: 1px solid #333333; color: #000000; font-family: sans-serif; font-size: 12px;">
+    <div style="text-align: center; font-weight: bold; font-size: 15px; border-bottom: 1.5px solid #000000; padding-bottom: 5px; margin-bottom: 10px;">TAX INVOICE</div>
+    <div style="display: flex; border: 1px solid #999999; margin-bottom: 10px;">
+        <div style="width: 50%; padding: 8px; border-right: 1px solid #999999; min-height: 100px;">
+            <b style="font-size: 14px; color: #002b49;">{src_name}</b><br/>
+            <small style="font-weight: bold; color: #555555;">{src_tagline}</small><br/>
+            {src_address.replace('\n', '<br/>')}<br/>
+            <b>GSTIN/UIN:</b> {src_gstin}<br/>
+            <b>Mob:</b> {src_mobile} | <b>Email:</b> {src_email}
+        </div>
+        <div style="width: 50%; padding: 8px; min-height: 100px;">
+            <b>Invoice #:</b> {invoice_serial_no}<br/>
+            <b>Dated:</b> {invoice_date_input.strftime('%d-%b-%Y')}<br/>
+            <b>Place of Supply:</b> {place_of_supply}<br/>
+            <b>Due Date:</b> {due_date_input.strftime('%d-%b-%Y')}
         </div>
     </div>
-    """,
-    unsafe_allow_html=True
-)
+    <div style="display: flex; border: 1px solid #999999; margin-bottom: 15px;">
+        <div style="width: 50%; padding: 8px; border-right: 1px solid #999999; background-color: #fafafa; min-height: 100px;">
+            <span style="color: #666666; font-weight: bold; font-size: 10px;">BUYER (BILL TO)</span><br/>
+            <b>{bill_name}</b><br/>
+            Attn: {bill_contact_person}<br/>
+            {bill_address.replace('\n', '<br/>')}<br/>
+            <b>GSTIN/UIN:</b> {bill_gstin} | <b>Ph:</b> {bill_contact_no}
+        </div>
+        <div style="width: 50%; padding: 8px; background-color: #f7faf6; min-height: 100px;">
+            <span style="color: #006100; font-weight: bold; font-size: 10px;">CONSIGNEE (SHIP TO)</span><br/>
+            <b>{bill_name}</b><br/>
+            {ship_addr_override.replace('\n', '<br/>')}
+        </div>
+    </div>
+    <div style="background-color: #f0f0f0; padding: 8px; font-weight: bold; border: 1px solid #999999; display: flex; justify-content: space-between;">
+        <span>Total Weight: {total_invoice_weight_mt:.4f} MT</span>
+        <span>Grand Total: Rs. {grand_invoice_total:,.2f}</span>
+    </div>
+</div>
+"""
+st.markdown(html_preview_box, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 st.dataframe(summary_df[["item_no", "part_number", "description", "hsn", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], use_container_width=True, hide_index=True)
@@ -276,7 +271,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Fixed: 320 + 220 = 540 total safe horizontal point width balance
     top_grid_data = [
         [Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_tagline']}<br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}<br/><b>Mob:</b> {data['src_mobile']} | <b>Email:</b> {data['src_email']}", meta_style),
          Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}<br/><b>Due Date:</b> {data['end_date']}", meta_style)]
@@ -286,7 +280,6 @@ def generate_invoice_pdf_file(data):
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    # 🔒 Fixed: 270 + 270 = 540 total safe horizontal point width balance
     addr_grid_data = [
         [Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>Attn: {data['bill_contact_person']}<br/><b>Address:</b> {data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']} | <b>Ph:</b> {data['bill_mobile']}", meta_style),
          Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]
@@ -296,7 +289,6 @@ def generate_invoice_pdf_file(data):
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # 🔒 Fixed: 30 + 140 + 50 + 45 + 45 + 60 + 50 + 70 = 540 total safe horizontal point width balance
     main_headers = [Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per Pieces", hdr_style), Paragraph("Total Weight In Ton", hdr_style), Paragraph("Per Ton Rate", hdr_style), Paragraph("Amount", hdr_style)]
     table_content = [main_headers]
     
@@ -308,7 +300,7 @@ def generate_invoice_pdf_file(data):
         ])
         
     start_tot_idx = len(table_content)
-    table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{total_invoice_pieces}</b>", cell_style), Paragraph("", cell_style), Paragraph(f"<b>{data['total_weight_mt']:.5f}</b>", cell_style), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_style)])
+    table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{total_invoice_pieces}</b>", cell_style), Paragraph("", cell_style), Paragraph(f"<b>{data['total_invoice_weight_mt']:.5f}</b>", cell_style), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Taxable Value:</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
@@ -327,7 +319,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Amount Chargeable (in words):</b> {data['total_words']}", meta_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Fixed: 100 + 100 + 80 + 130 + 130 = 540 total safe horizontal point width balance
     hsn_headers = [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
     hsn_content = [hsn_headers]
     
@@ -336,7 +327,7 @@ def generate_invoice_pdf_file(data):
             Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style),
             Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)
         ])
-    hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
+    hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}</b>", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
     hsn_table = Table(hsn_content, colWidths=[100, 100, 80, 130, 130])
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
@@ -346,7 +337,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    # 🔒 Fixed: 290 + 250 = 540 total safe horizontal point width balance
     footer_data = [
         [Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>Branch & IFS Code: <b>IDIB000P618</b>", meta_style),
          Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]
@@ -358,10 +348,11 @@ def generate_invoice_pdf_file(data):
     doc.build(story)
     return pdf_filename
 
-# Document Submission Panel
+# Document Assembly Trigger
 st.markdown("---")
 st.subheader("📥 Step 4: Invoice Assembly Panel")
 
+# 🚀 FIX: Securely aligned variable name to 'total_invoice_weight_mt'
 invoice_payload = {
     "invoice_no": str(invoice_serial_no), "start_date": invoice_date_input.strftime("%d-%b-%Y"), "end_date": due_date_input.strftime("%d-%b-%Y"),
     "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_tagline": str(src_tagline), "src_address": str(src_address),
@@ -369,7 +360,8 @@ invoice_payload = {
     "bill_contact_person": str(bill_contact_person), "bill_address": str(bill_address), "bill_gstin": str(bill_gstin),
     "bill_mobile": str(bill_contact_no), "ship_address": str(ship_addr_override), "line_items": line_items_payload,
     "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
-    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map
+    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map,
+    "total_invoice_weight_mt": total_invoice_weight_mt
 }
 
 if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_container_width=True):
