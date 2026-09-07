@@ -49,6 +49,13 @@ if catalog_df.empty:
 
 st.title("🏭 Automated GST Commercial Tax Invoice Platform")
 st.markdown("---")
+
+# Helper utility to cleanly extract fields without dropping into string conversion crashes
+def clean_db_val(row_dict, key_name, fallback_text):
+    val = row_dict.get(key_name)
+    if val is None or str(val).strip() == "" or str(val).lower() == "none":
+        return fallback_text
+    return str(val).strip()
 # ============================================================================
 # BLOCK 1: SOURCE COMPANY DETAILS (LEFT) & SHIPPING CLIENT DETAILS (RIGHT)
 # ============================================================================
@@ -59,14 +66,16 @@ with col_s1:
     st.markdown("**🛡️ Source Company Details (Seller End)**")
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"] if not corporate_df.empty else pd.DataFrame()
     owner_records = owner_df.to_dict(orient="records") if not owner_df.empty else []
+    
+    # 🔍 ARRAY EXTRACTION FIX: Extract the actual dictionary item index out of the records list
     o_row = owner_records[0] if len(owner_records) > 0 else {}
     
-    src_name = st.text_input("Seller Legal Name", o_row.get("company_name", "CLASSIC INDUSTRIES"))
-    src_address = st.text_area("Full Corporate Factory Address", o_row.get("billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"))
-    src_gstin = st.text_input("Seller GSTIN Code Token", o_row.get("gstin", "09ENRPS7521A1ZN"))
-    src_mobile = st.text_input("Seller Contact Mobile", o_row.get("contact_number", "9999999999"))
-    src_email = st.text_input("Seller Operations Email", o_row.get("email_address", "billing@classicindustries.in"))
-    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Left Panel Override)", value=str(o_row.get("hsn_number", "998349")))
+    src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"))
+    src_address = st.text_area("Full Corporate Factory Address", clean_db_val(o_row, "billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"))
+    src_gstin = st.text_input("Seller GSTIN Code Token", clean_db_val(o_row, "gstin", "09ENRPS7521A1ZN"))
+    src_mobile = st.text_input("Seller Contact Mobile", clean_db_val(o_row, "contact_number", "9999999999"))
+    src_email = st.text_input("Seller Operations Email", clean_db_val(o_row, "email_address", "billing@classicindustries.in"))
+    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Left Panel Override)", value=clean_db_val(o_row, "hsn_number", "998349"))
 
 with col_s2:
     st.markdown("**🏢 Shipping Client Details (Buyer End)**")
@@ -80,17 +89,20 @@ with col_s2:
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
         c_row = c_match[0] if c_match else {}
         
-        bill_name = st.text_input("Buyer Registered Corporate Name", str(c_row.get("company_name", "")))
-        bill_gstin = st.text_input("Buyer GSTIN Token", str(c_row.get("gstin", "")))
-        bill_address = st.text_area("Buyer Corporate Billing Address", str(c_row.get("billing_address", "")))
-        bill_person = st.text_input("Attn / Customer Contact Person", str(c_row.get("contact_person", "Operations Head")))
-        bill_no = st.text_input("Buyer Contact Phone Number", str(c_row.get("contact_number", "")))
-        base_pos = f"{str(c_row.get('state_code','00')).zfill(2)}-{str(c_row.get('state_name','UNKNOWN')).upper()}"
+        bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"))
+        bill_gstin = st.text_input("Buyer GSTIN Token", clean_db_val(c_row, "gstin", "08AAACA8504G2ZW"))
+        bill_address = st.text_area("Buyer Corporate Billing Address", clean_db_val(c_row, "billing_address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019"))
+        bill_person = st.text_input("Attn / Customer Contact Person", clean_db_val(c_row, "contact_person", "Operations Head"))
+        bill_no = st.text_input("Buyer Contact Phone Number", clean_db_val(c_row, "contact_number", "9999999999"))
+        
+        st_code = str(c_row.get('state_code', '08')).zfill(2)
+        st_name = str(c_row.get('state_name', 'RAJASTHAN')).upper()
+        base_pos = f"{st_code}-{st_name}"
     else:
         bill_name = st.text_input("Buyer Registered Corporate Name", "REVENT METALCAST LIMITED")
         bill_gstin = st.text_input("Buyer GSTIN Token", "08AAACA8504G2ZW")
         bill_address = st.text_area("Buyer Corporate Billing Address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019")
-        bill_person = st.text_input("Attn / Customer Contact Person", "Contact_Person")
+        bill_person = st.text_input("Attn / Customer Contact Person", "Operations Head")
         bill_no = st.text_input("Buyer Contact Phone Number", "9999999999")
         base_pos = "08-RAJASTHAN"
 
@@ -169,8 +181,12 @@ except Exception as e:
     iso_start = start_date.strftime("%Y-%m-%d")
     iso_end = end_date.strftime("%Y-%m-%d")
     merged_summary = pd.DataFrame([
-        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "73259910", "qty_nos": 80, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 669, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end}
+        {"part_number": "458/20418P", "description": "DRIVE HEAD CASING", "hsn_code": "998349", "qty_nos": 121, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "84262252.9", "description": "CHN TRACTOR HOUSING TRUMPET LH", "hsn_code": "998349", "qty_nos": 80, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "84262253.9", "description": "CHN TRACTOR HOUSING TRUMPET RH", "hsn_code": "998349", "qty_nos": 84, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "92180026", "description": "HOUSING MCH DC", "hsn_code": "998349", "qty_nos": 45, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "998349", "qty_nos": 564, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 132, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end}
     ])
 
 for idx, row in merged_summary.iterrows():
@@ -180,14 +196,33 @@ for idx, row in merged_summary.iterrows():
     sim_qty = int(row["qty_nos"])
     p_desc = str(row["description"]).upper()
     
+    # 🔍 DYNAMIC LOOKUP: Fetch direct match parameters out of master view schema
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
-    p_weight_kg = float(match_part["weight_kg"].values[0]) if not match_part.empty else 28.0
-    p_rate = 2650.00
+    
+    if not match_part.empty:
+        p_weight_kg = float(match_part["weight_kg"].values[0]) if pd.notna(match_part["weight_kg"].values[0]) else 28.0
+        
+        # Pull dynamic rate_per_ton metrics
+        if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values[0]):
+            p_rate = float(match_part["rate_per_ton"].values[0])
+        else:
+            p_rate = 2650.00
+            
+        # Pull dynamic database HSN settings
+        hsn_col_found = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
+        if hsn_col_found and pd.notna(match_part[hsn_col_found[0]].values[0]):
+            db_hsn = str(match_part[hsn_col_found[0]].values[0]).strip()
+        else:
+            db_hsn = "998349"
+    else:
+        p_weight_kg = 28.0
+        p_rate = 2650.00
+        db_hsn = "998349"
     
     if parsed_hsn_override_list:
         hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)]
     else:
-        hsn_code = str(row.get("hsn_code", "998349")).strip()
+        hsn_code = db_hsn
         
     s_date_raw = str(row["txn_start_raw"])
     e_date_raw = str(row["txn_end_date_raw"])
@@ -273,7 +308,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("<b>TAX INVOICE</b>", ParagraphStyle('H1', fontName='Helvetica-Bold', fontSize=14)))
     story.append(Spacer(1, 10))
     
-    # 🔒 Explicit column dimensions balance (320 + 220 = 540 max horizontal points width)
     top_table = Table([[
         Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), 
         Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)
@@ -282,7 +316,6 @@ def generate_invoice_pdf_file(data):
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    # 🔒 Explicit horizontal point geometries (270 + 270 = 540 points layout split)
     addr_table = Table([[
         Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), 
         Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)
@@ -291,7 +324,6 @@ def generate_invoice_pdf_file(data):
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # 🔒 Explicit point parameters matrix sum (30 + 130 + 55 + 45 + 50 + 65 + 55 + 110 = 540)
     table_content = [[
         Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), 
         Paragraph("Quantity", hdr_style), Paragraph("Weight/Pc", hdr_style), Paragraph("Total Weight (MT)", hdr_style), 
@@ -319,7 +351,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Amount Chargeable (in words):</b> {data['total_words']}", meta_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Explicit point grids balance (100 + 110 + 80 + 125 + 125 = 540)
     hsn_content = [[Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]]
     for hsn_code, vals in data["hsn_map"].items():
         hsn_content.append([Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style), Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)])
@@ -333,7 +364,6 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    # 🔒 Explicit width geometries (300 + 240 = 540 points layout split)
     footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[300, 240])
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
@@ -351,15 +381,12 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_containe
         st.error("❌ Cannot compile an empty invoice layout. Check your ledger filters.")
     else:
         try:
-            # 🔍 Task 3: Check for duplicate invoice serial numbers
             dup_check = supabase.table("cntr_invoice_history").select("invoice_no").eq("invoice_no", invoice_payload["invoice_no"]).execute()
             if dup_check.data:
                 st.error(f"⚠️ Validation Failure: Invoice serial number **{invoice_payload['invoice_no']}** already exists in the history tracking log. Please alter the custom sequence string.")
             else:
-                # Compile PDF file structure
                 f_path = generate_invoice_pdf_file(invoice_payload)
                 
-                # 📝 Task 2: Persist audit log record to history tracking table
                 history_row = {
                     "invoice_no": invoice_payload["invoice_no"],
                     "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
