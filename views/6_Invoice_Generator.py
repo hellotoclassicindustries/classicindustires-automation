@@ -59,7 +59,7 @@ def clean_db_val(row_dict, key_name, fallback_text):
 # ============================================================================
 # BLOCK 1: SOURCE COMPANY DETAILS (LEFT) & SHIPPING CLIENT DETAILS (RIGHT)
 # ============================================================================
-st.subheader("🏛️ Block 1: Corporate Entity Address Profiles")
+st.subheader("🏛️ Corporate Profiles")
 col_s1, col_s2 = st.columns(2)
 
 with col_s1:
