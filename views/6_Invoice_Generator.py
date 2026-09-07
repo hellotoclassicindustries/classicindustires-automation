@@ -141,7 +141,6 @@ try:
     iso_start = start_date.strftime("%Y-%m-%d 00:00:00")
     iso_end = end_date.strftime("%Y-%m-%d 23:59:59")
     
-    # 🚀 THE DATE FILTER RESOLUTION: Queries the continuous timeline using absolute chronological limits
     ledger_response = supabase.table("staging_ledger").select("*").gte("production_date", iso_start).lte("production_date", iso_end).execute()
     ledger_records = ledger_response.data
     ledger_df = pd.DataFrame(ledger_records)
@@ -160,9 +159,9 @@ except Exception as e:
         {"production_date": end_date.strftime("%Y-%m-%d"), "part_number": "9330093", "description": "EATON GEARCASE CASTING", "weight_kg": 57.0, "pieces_completed": 289}
     ])
 
-for idx, row in merged_summary.iterrows():
+# Execute precise operations loop row by row
+for row_idx, row in merged_summary.iterrows():
     p_num = str(row["part_number"])
-    # Filter constraints check
     if is_filtered_run and p_num.upper() not in selected_display.upper(): continue
         
     sim_qty = int(row["pieces_completed"])
@@ -171,7 +170,13 @@ for idx, row in merged_summary.iterrows():
     p_rate = 2650.00
     
     hsn_code = parsed_hsn_list[len(line_items_payload) % len(parsed_hsn_list)] if parsed_hsn_list else "998349"
-    txn_date_str = datetime.strptime(str(row["production_date"]).split("T")[0], "%Y-%m-%d").strftime("%d-%b-%Y") if "-" in str(row["production_date"]) else str(row["production_date"])
+    
+    # 🚀 FIXED STRING CONVERSION: Safe string slice formatting prevents character parsing drops
+    raw_date_str = str(row["production_date"]).split(" ")[0]
+    try:
+        txn_date_str = datetime.strptime(raw_date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
+    except:
+        txn_date_str = raw_date_str
     
     total_wt_mt = (sim_qty * p_weight_kg) / 1000.0
     taxable_val = total_wt_mt * p_rate
@@ -190,7 +195,6 @@ for idx, row in merged_summary.iterrows():
 
 summary_df = pd.DataFrame(line_items_payload)
 
-# 🚀 THE DROPDOWN CRASH PROTECTION LAYER: Pre-verifies dataframe index limits to prevent None axis drop errors
 if not summary_df.empty:
     total_invoice_pieces = int(summary_df["qty"].sum())
     total_invoice_weight_mt = float(summary_df["total_wt_mt"].sum())
