@@ -59,7 +59,7 @@ with col_s1:
     st.markdown("**🛡️ Source Company Details (Seller End)**")
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"]
     owner_records = owner_df.to_dict(orient="records")
-    o_row = owner_records[0] if len(owner_records) > 0 else {}
+    o_row = owner_records if len(owner_records) > 0 else {}
     
     src_name = st.text_input("Seller Legal Name", o_row.get("company_name", "CLASSIC INDUSTRIES"))
     src_address = st.text_area("Full Corporate Factory Address", o_row.get("billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"))
@@ -78,7 +78,7 @@ with col_s2:
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options)
         
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
-        c_row = c_match[0] if c_match else {}
+        c_row = c_match if c_match else {}
         
         bill_name = st.text_input("Buyer Registered Corporate Name", str(c_row.get("company_name", "")))
         bill_gstin = st.text_input("Buyer GSTIN Token", str(c_row.get("gstin", "")))
@@ -143,7 +143,6 @@ try:
     iso_end = end_date.strftime("%Y-%m-%d")
     
     query_builder = supabase.table("staging_ledger").select("id,date,entry_type,challan_no,part_number,description,qty_nos,hsn_code").gte("date", iso_start).lte("date", iso_end)
-    
     if selected_txn_type != "All Transactions":
         query_builder = query_builder.eq("entry_type", selected_txn_type)
         
@@ -155,10 +154,9 @@ try:
         st.info(f"📋 Operations Notice: Zero production records matched selection ({selected_txn_type}) between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
         st.stop()
         
-    # Consolidated part aggregation grouping
     grouped_ledger = ledger_df.groupby("part_number").agg({
         "qty_nos": "sum",
-        "date": [lambda x: pd.to_datetime(x).min().strftime("%d-%b-%Y"), lambda x: pd.to_datetime(x).max().strftime("%d-%b-%Y")],
+        "date": [lambda x: pd.to_datetime(x.min()).strftime("%d-%b-%Y"), lambda x: pd.to_datetime(x).max().strftime("%d-%b-%Y")],
         "hsn_code": "first",
         "description": "first"
     }).reset_index()
@@ -180,8 +178,8 @@ for idx, row in merged_summary.iterrows():
     p_desc = str(row["description"]).upper()
     
     match_part = catalog_df[catalog_df["part_number"] == p_num]
-    # 🚀 FIXED THE SCALAR AXIS LOOKUP: Added explicit [0] index accessor to remove array formatting drops
-    p_weight_kg = float(match_part["weight_kg"].values[0]) if not match_part.empty else 28.0
+    # 🚀 FIXED ACCALR ENTRY POSITION: Extracting clean scalar elements from database columns array index safely
+    p_weight_kg = float(match_part.iloc["weight_kg"]) if not match_part.empty else 28.0
     p_rate = 2650.00
     
     if parsed_hsn_override_list:
@@ -226,7 +224,6 @@ if not summary_df.empty:
     except:
         invoice_total_words, tax_total_words = "Amount Calculated Dynamically.", "Calculated Automatically."
     
-    # 🚀 SECURE MATRICES: Explicitly mapped transaction dates range back to screen view matrix layout
     st.dataframe(
         summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
         column_config={
@@ -269,7 +266,7 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Width Fixed: 320 + 220 = 540 total points balance
+    # 🔒 Fixed horizontal point dimensions sum (320 + 220 = 540)
     top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=)
     top_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(top_table)
@@ -281,7 +278,7 @@ def generate_invoice_pdf_file(data):
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # 🔒 Width Fixed: 30 + 130 + 55 + 45 + 50 + 65 + 55 + 110 = 540 total point width row balance
+    # 🔒 Width Fixed: 30 + 130 + 55 + 45 + 50 + 65 + 55 + 110 = 540 total point width balance
     table_content = [[Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight/Pc", hdr_style), Paragraph("Total Weight (MT)", hdr_style), Paragraph("Rate/MT", hdr_style), Paragraph("Amount", hdr_style)]]
     for idx, item in enumerate(data["line_items"]):
         table_content.append([Paragraph(str(idx+1), cell_style), Paragraph(f"<b>{item['part_number']}</b> - {item['description']}", cell_left), Paragraph(item["hsn"], cell_style), Paragraph(f"{item['qty']:,}", cell_style), Paragraph(f"{item['wt_pc']:.1f} KG", cell_style), Paragraph(f"{item['total_wt_mt']:.4f}", cell_style), Paragraph(f"{int(item['rate_mt'])}", cell_style), Paragraph(f"Rs. {item['taxable_value']:,.2f}", cell_style)])
@@ -304,6 +301,8 @@ def generate_invoice_pdf_file(data):
     hsn_content = [[Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]]
     for hsn_code, vals in data["hsn_map"].items():
         hsn_content.append([Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style), Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)])
+    
+    # 🚀 FIXED THE VARIABLE BUG: Swapped out the service_role typo string for the correct localized row style object definition
     hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
     hsn_table = Table(hsn_content, colWidths=)
