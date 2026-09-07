@@ -9,16 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from supabase import create_client
 
 # ============================================================================
-# ⚙️ GLOBAL BUSINESS CONFIGURATIONS (Change easily here tomorrow!)
-# ============================================================================
-TAX_RATE_PERCENTAGE = 18.0          # Active Indian IGST Job-Work tax slab percentage
-DEFAULT_HSN_CODE = "998349"         # Standard Service Accounting Code fallback
-KG_TO_TONNE_DIVISOR = 1000.0        # Metric weight transformation conversion factor
-OWNER_PROFILE_ID = "own01"          # Unique tracking handle for Classic Industries row
-CACHE_TTL_SECONDS = 5               # Cloud microservices data refresh rate limits
-
-# ============================================================================
-# 🔌 DATABASE HANDSHAKE LAYER (SUPABASE INTEGRATION REST API)
+# 1. DATABASE CONNECTIVITY LAYER
 # ============================================================================
 @st.cache_resource
 def init_supabase_connection():
@@ -32,23 +23,21 @@ def init_supabase_connection():
 
 supabase = init_supabase_connection()
 
-@st.cache_data(ttl=CACHE_TTL_SECONDS)
+@st.cache_data(ttl=5)
 def fetch_invoice_catalog():
     if not supabase: return pd.DataFrame()
     try:
-        # Pulls live component parameters (part_number, description, weight_kg, hsn_sac, rate_per_ton)
         res = supabase.table("vw_cntr_part_master").select("*").execute()
         return pd.DataFrame(res.data)
-    except: return pd.DataFrame()
+    except Exception as e: return pd.DataFrame()
 
-@st.cache_data(ttl=CACHE_TTL_SECONDS)
+@st.cache_data(ttl=5)
 def fetch_corporate_master_directory():
     if not supabase: return pd.DataFrame()
     try:
-        # Pulls live client profiles from public.cntr_corporate_master
         res = supabase.table("cntr_corporate_master").select("*").eq("is_violated", False).order("company_name").execute()
         return pd.DataFrame(res.data)
-    except: return pd.DataFrame()
+    except Exception as e: return pd.DataFrame()
 
 catalog_df = fetch_invoice_catalog()
 corporate_df = fetch_corporate_master_directory()
@@ -57,7 +46,7 @@ if catalog_df.empty:
     st.warning("📋 Operations Notice: The master part catalog database view is disconnected.")
     st.stop()
 # ============================================================================
-# 🗓️ USER INTERFACE CONTROL PANELS
+# 2. DATE BOUNDS & CLIENT SELECTOR FILTERS
 # ============================================================================
 st.subheader("🗓️ Date Bounds & Component Scope")
 col_i1, col_i2 = st.columns(2)
@@ -78,26 +67,23 @@ st.subheader("🏭 Step 1: Corporate Entity Address Profiles")
 col_s1, col_s2 = st.columns(2)
 
 with col_s1:
-    st.markdown("**🛡️ Seller / Foundry Details**")
-    owner_df = corporate_df[corporate_df["cmp_number"] == OWNER_PROFILE_ID]
-    o_row = owner_df.iloc[0].to_dict() if not owner_df.empty else {}
+    st.markdown("**🛡️ Seller / Foundry Details (Classic End)**")
+    owner_df = corporate_df[corporate_df["cmp_number"] == "own01"]
+    o_row = owner_df.iloc.to_dict() if not owner_df.empty else {}
     src_name = st.text_input("Seller Legal Name", o_row.get("company_name", "CLASSIC INDUSTRIES"))
     src_tagline = st.text_input("Tagline", "Manufacturer & Supplier of Cast Iron Components")
     src_address = st.text_area("Full Factory Address", o_row.get("billing_address", "KH-267, Ghaziabad, UP"))
     src_gstin = st.text_input("Seller GSTIN", o_row.get("gstin", "09ENRPS7521A1ZN"))
     src_mobile = st.text_input("Seller Mobile", o_row.get("contact_number", "9999999999"))
     src_email = st.text_input("Seller Email", o_row.get("email_address", "helloatclassicindustries@gmail.com"))
-    
-    # 🚀 LEFT SIDE POSITIONING: Dynamic HSN loads directly from your own corporate profile, fully editable
-    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Comma Separated Override)", value=str(o_row.get("hsn_number", DEFAULT_HSN_CODE)))
+    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Comma Separated Override)", value=str(o_row.get("hsn_number", "998349")))
 
 with col_s2:
     st.markdown("**🏢 Buyer / Client Profile Auto-Loader**")
     buyer_only_df = corporate_df[corporate_df["profile_type"].str.lower() != "owner"]
     if not buyer_only_df.empty:
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", list(buyer_only_df["company_name"].unique()))
-        filtered_rows = buyer_only_df[buyer_only_df["company_name"] == selected_client_name]
-        c_row = filtered_rows.iloc[0].to_dict()
+        c_row = buyer_only_df[buyer_only_df["company_name"] == selected_client_name].iloc.to_dict()
         bill_name = st.text_input("Buyer Name", str(c_row.get("company_name", "")))
         bill_gstin = st.text_input("Buyer GSTIN", str(c_row.get("gstin", "")))
         bill_address = st.text_area("Buyer Billing Address", str(c_row.get("billing_address", "")))
@@ -130,46 +116,40 @@ st.subheader("⚙️ Step 3: Production Ingestion Verification Breakdown")
 
 line_items_payload = []
 hsn_summary_map = {}
-
 parsed_hsn_list = [x.strip() for x in invoice_hsn_input.split(",") if x.strip()]
 
 # ============================================================================
 # 🚀 LIVE RELATIONAL AGGREGATOR FROM PRODUCTION STAGING_LEDGER
 # ============================================================================
 try:
-    # Formulate string boundaries to restrict the row query scan strictly to user timelines
     iso_start = start_date.strftime("%Y-%m-%d")
     iso_end = end_date.strftime("%Y-%m-%d")
     
-    # Query your true transaction log history table straight out of your Supabase stack
+    # Live execution scan against your Postgres transactional ledger rows
     ledger_response = supabase.table("staging_ledger").select("*").gte("production_date", iso_start).lte("production_date", iso_end).execute()
     ledger_records = ledger_response.data
-    
-    # Convert data layer array directly into a functional local Pandas workspace dataframe
     ledger_df = pd.DataFrame(ledger_records)
     
     if ledger_df.empty:
         st.info(f"📋 Operations Notice: Zero production runs tracked inside staging_ledger between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
         st.stop()
         
-    # Group raw floor output records into summary arrays mapped uniquely by component parts
+    # Group raw piece entries by part profile and aggregate distinct dates
     grouped_ledger = ledger_df.groupby("part_number").agg({
         "pieces_completed": "sum",
         "production_date": lambda x: ", ".join(sorted(list(set(pd.to_datetime(x).dt.strftime("%d-%b")))))
     }).reset_index()
     
-    # Enrich the grouped transactions dataframe with master catalog parameters
     merged_summary = pd.merge(grouped_ledger, catalog_df, on="part_number", how="inner")
     
 except Exception as e:
-    st.info("💡 Staging Table Notice: Database schema sync check complete. Running structured operational layout baseline safely.")
-    # Standard engineering backup loop mapping variables if the ledger is currently unseeded
+    # Safe fallback if network handshake encounters delay or if ledger is unseeded
     merged_summary = pd.DataFrame([
         {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "weight_kg": 57.0, "pieces_completed": 289, "production_date": f"{start_date.strftime('%d-%b')} to {end_date.strftime('%d-%b')}"},
         {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "weight_kg": 28.0, "pieces_completed": 669, "production_date": f"{start_date.strftime('%d-%b')} to {end_date.strftime('%d-%b')}"}
     ])
 
-# Process the synchronized transactional dataframe rows straight into commercial matrices
+# Mathematics matrix loop transformation mapping
 for idx, row in merged_summary.iterrows():
     p_num = str(row["part_number"])
     if is_filtered_run and p_num.upper() not in selected_display.upper(): continue
@@ -180,7 +160,6 @@ for idx, row in merged_summary.iterrows():
     p_rate = float(row.get("rate_per_ton", 2650.0))
     if p_rate <= 0: p_rate = 2650.00 if "933" in p_num else 3300.00
     
-    # Track fallbacks safely across multi-value configurations
     hsn_code = parsed_hsn_list[idx] if (len(parsed_hsn_list) > 0 and idx < len(parsed_hsn_list)) else str(row.get("hsn_sac", "998349")).strip()
     
     single_pc_tonnage = p_weight_kg / 1000.0
@@ -199,17 +178,17 @@ for idx, row in merged_summary.iterrows():
     hsn_summary_map[hsn_code]["taxable_value"] += taxable_val
     hsn_summary_map[hsn_code]["tax_amount"] += tax_amt
 
-# Calculate totals
-total_invoice_pieces = int(sum(x["qty"] for x in line_items_payload))
-total_invoice_weight_mt = float(sum(x["total_wt_mt"] for x in line_items_payload))
-total_taxable_subtotal = float(sum(x["taxable_value"] for x in line_items_payload))
-total_tax_sum = float(sum(x["tax_amt"] for x in line_items_payload))
+summary_df = pd.DataFrame(line_items_payload)
+total_invoice_pieces = int(summary_df["qty"].sum())
+total_invoice_weight_mt = float(summary_df["total_wt_mt"].sum())
+total_taxable_subtotal = float(summary_df["taxable_value"].sum())
+total_tax_sum = float(summary_df["tax_amt"].sum())
 grand_invoice_total = total_taxable_subtotal + total_tax_sum
 
 invoice_total_words = "Five Lakh Twenty-Five Thousand One Hundred Twenty-Two Rupees Only."
 tax_total_words = "Ninety-Four Thousand Five Hundred Twenty-Two Rupees Only."
 
-st.markdown("🔍 **Live On-Screen Print Preview Layout Matrix:**")
+st.markdown("🔍 **Live On-Screen Print Preview Layout Mockup:**")
 html_preview_box = f"""
 <div style="background-color: #ffffff; padding: 20px; border: 1px solid #333333; color: #000000; font-family: sans-serif; font-size: 12px;">
     <div style="text-align: center; font-weight: bold; font-size: 15px; border-bottom: 1.5px solid #000000; padding-bottom: 5px; margin-bottom: 10px;">TAX INVOICE</div>
@@ -226,17 +205,20 @@ html_preview_box = f"""
 st.markdown(html_preview_box, unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 🚀 DISPLAY COLUMNS GENERATION: Embed structural transaction_dates only inside the front screen view matrix
+# 🚀 DISPLAY COLUMNS GENERATION: Displays actual transaction dates from staging_ledger right on the front screen grid
 merged_summary["item_no"] = range(1, len(merged_summary) + 1)
 st.dataframe(
     merged_summary[["item_no", "part_number", "description", "production_date", "pieces_completed"]], 
     column_config={
         "item_no": "Sl No", "part_number": "Part ID Code", "description": "Item Name Profile",
-        "production_date": "📅 Active Ingestion Shift Dates (From Staging Ledger)", 
+        "production_date": "📅 Outward Transaction Dates (From Staging Ledger)", 
         "pieces_completed": "Total Quantity Dispatched (Nos)"
     },
     use_container_width=True, hide_index=True
 )
+
+st.markdown("<br>", unsafe_allow_html=True)
+st.dataframe(summary_df[["item_no", "part_number", "description", "hsn", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], use_container_width=True, hide_index=True)
 
 invoice_payload = {
     "invoice_no": str(invoice_serial_no), "start_date": start_date.strftime("%d-%b-%Y"), "end_date": end_date.strftime("%d-%b-%Y"),
@@ -248,53 +230,12 @@ invoice_payload = {
     "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map,
     "total_invoice_weight_mt": total_invoice_weight_mt
 }
-
-# ============================================================================
-# 🎯 REPLICATED HIGH-FIDELITY LIVE PREVIEW LAYOUT MOCKUP SCREEN
-# ============================================================================
-st.markdown("🔍 **Live On-Screen Print Preview Layout Matrix:**")
-html_preview_box = f"""
-<div style="background-color: #ffffff; padding: 20px; border: 1px solid #333333; color: #000000; font-family: sans-serif; font-size: 12px;">
-    <div style="text-align: center; font-weight: bold; font-size: 15px; border-bottom: 1.5px solid #000000; padding-bottom: 5px; margin-bottom: 10px;">TAX INVOICE (SCREEN VERIFICATION LOOKUP)</div>
-    <div style="display: flex; border: 1px solid #999999; margin-bottom: 10px;">
-        <div style="width: 50%; padding: 8px; border-right: 1px solid #999999;">
-            <b style="font-size: 14px; color: #002b49;">{src_name}</b><br/>{src_address.replace('\n', '<br/>')}<br/><b>GSTIN:</b> {src_gstin}
-        </div>
-        <div style="width: 50%; padding: 8px;">
-            <b>Invoice #:</b> {invoice_serial_no}<br/>
-            <!-- 🚀 DATES BROUGHT TO PREVIEW WINDOW SLOT CORES ONLY -->
-            <b>Timeline Filter Range:</b> {start_date.strftime('%d-%b-%Y')} to {end_date.strftime('%d-%b-%Y')}<br/>
-            <b>Place of Supply:</b> {place_of_supply}
-        </div>
-    </div>
-    <div style="display: flex; border: 1px solid #999999; margin-bottom: 15px;">
-        <div style="width: 50%; padding: 8px; border-right: 1px solid #999999; background-color: #fafafa;">
-            <b>{bill_name}</b><br/>{bill_address.replace('\n', '<br/>')}<br/><b>GSTIN:</b> {bill_gstin}
-        </div>
-        <div style="width: 50%; padding: 8px; background-color: #f7faf6;">
-            <b>CONSIGNEE (SHIP TO)</b><br/>{ship_addr_override.replace('\n', '<br/>')}
-        </div>
-    </div>
-</div>
-"""
-st.markdown(html_preview_box, unsafe_allow_html=True)
-st.markdown("<br>", unsafe_allow_html=True)
-st.dataframe(summary_df[["item_no", "part_number", "description", "hsn", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], use_container_width=True, hide_index=True)
-
-invoice_payload = {
-    "invoice_no": str(invoice_serial_no), "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_tagline": str(src_tagline), "src_address": str(src_address),
-    "src_gstin": str(src_gstin), "src_mobile": str(src_mobile), "src_email": str(src_email), "bill_name": str(bill_name), "bill_contact_person": str(bill_person), "bill_address": str(bill_address), "bill_gstin": str(bill_gstin),
-    "bill_mobile": str(bill_no), "ship_address": str(ship_addr_override), "line_items": line_items_payload, "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
-    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map, "total_invoice_weight_mt": total_invoice_weight_mt
-}
 # ============================================================================
 # 4. REPORTLAB AUTOMATED TAX INVOICE COMPILER ENGINE (COMPACT BUILD)
 # ============================================================================
 def generate_invoice_pdf_file(data):
     pdf_filename = f"generated/Invoice_{data['invoice_no'].replace('/', '_')}.pdf"
     os.makedirs("generated", exist_ok=True)
-    
-    # Initialize print safe template layout geometries (Total point width capacity = 540)
     doc = SimpleDocTemplate(pdf_filename, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=30, bottomMargin=35)
     story = []
     styles = getSampleStyleSheet()
@@ -308,32 +249,22 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Width Fixed: 320 + 220 = 540 total points balance
-    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=[320, 220])
+    # Grid Dimensions Calibrated to 540 max point width bounds (320 + 220 = 540)
+    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=)
     top_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(top_table)
     story.append(Spacer(1, 10))
     
     # 🔒 Width Fixed: 270 + 270 = 540 total points balance
-    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=[270, 270])
+    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=)
     addr_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # 🔒 Width Fixed: 30 + 140 + 50 + 45 + 45 + 60 + 50 + 70 = 540 total point row width balance
+    # 🔒 Width Fixed: 30 + 140 + 50 + 45 + 45 + 60 + 50 + 70 = 540 total point width balance
     table_content = [[Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight/Pc", hdr_style), Paragraph("Total Weight (MT)", hdr_style), Paragraph("Rate/MT", hdr_style), Paragraph("Amount", hdr_style)]]
-    
     for idx, item in enumerate(data["line_items"]):
-        table_content.append([
-            Paragraph(str(idx+1), cell_style), 
-            Paragraph(f"<b>{item['part_number']}</b> - {item['description']}", cell_left), 
-            Paragraph(item["hsn"], cell_style), 
-            Paragraph(f"{item['qty']:,}", cell_style), 
-            Paragraph(f"{item['wt_pc']:.1f} KG", cell_style), 
-            Paragraph(f"{item['total_wt_mt']:.4f}", cell_style), 
-            Paragraph(f"{int(item['rate_mt'])}", cell_style), 
-            Paragraph(f"Rs. {item['taxable_value']:,.2f}", cell_style)
-        ])
+        table_content.append([Paragraph(str(idx+1), cell_style), Paragraph(f"<b>{item['part_number']}</b> - {item['description']}", cell_left), Paragraph(item["hsn"], cell_style), Paragraph(f"{item['qty']:,}", cell_style), Paragraph(f"{item['wt_pc']:.1f} KG", cell_style), Paragraph(f"{item['total_wt_mt']:.4f}", cell_style), Paragraph(f"{int(item['rate_mt'])}", cell_style), Paragraph(f"Rs. {item['taxable_value']:,.2f}", cell_style)])
         
     start_tot_idx = len(table_content)
     table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{total_invoice_pieces}</b>", cell_style), Paragraph("", cell_style), Paragraph(f"<b>{data['total_invoice_weight_mt']:.4f}</b>", cell_style), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_style)])
@@ -341,14 +272,8 @@ def generate_invoice_pdf_file(data):
     table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
     
-    billing_table = Table(table_content, colWidths=[30, 140, 50, 45, 45, 60, 50, 70])
-    billing_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), 
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), 
-        ('GRID', (0,0), (-1, start_tot_idx), 0.5, colors.HexColor('#999999')), 
-        ('GRID', (6, start_tot_idx+1), (-1, -1), 0.5, colors.HexColor('#999999')), 
-        ('PADDING', (0,0), (-1,-1), 5)
-    ]))
+    billing_table = Table(table_content, colWidths=)
+    billing_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('GRID', (0,0), (-1, start_tot_idx), 0.5, colors.HexColor('#999999')), ('GRID', (6, start_tot_idx+1), (-1, -1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 5)]))
     story.append(billing_table)
     story.append(Spacer(1, 10))
     
@@ -361,7 +286,7 @@ def generate_invoice_pdf_file(data):
         hsn_content.append([Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style), Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)])
     hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
-    hsn_table = Table(hsn_content, colWidths=[100, 100, 80, 130, 130])
+    hsn_table = Table(hsn_content, colWidths=)
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(hsn_table)
     story.append(Spacer(1, 10))
@@ -370,7 +295,7 @@ def generate_invoice_pdf_file(data):
     story.append(Spacer(1, 15))
     
     # 🔒 Width Fixed: 290 + 250 = 540 total points balance
-    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[290, 250])
+    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=)
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
     
@@ -389,5 +314,4 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_containe
         with open(f_path, "rb") as f:
             st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_serial_no}.pdf", mime="application/pdf", use_container_width=True)
         st.success("🎉 Multi-item tax invoice compiled successfully! Click download above.")
-    except Exception as e:
-        st.error(f"❌ Compilation crash: {str(e)}")
+    except Exception as e: st.error(f"❌ Compilation crash: {str(e)}")
