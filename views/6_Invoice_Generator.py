@@ -405,3 +405,4 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_containe
                 st.success("🎉 Multi-item tax invoice compiled and saved to cloud registry successfully! Click download above.")
         except Exception as e: 
             st.error(f"❌ Structural Compilation Exception: {str(e)}")
+
