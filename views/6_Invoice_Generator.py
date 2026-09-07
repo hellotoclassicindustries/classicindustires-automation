@@ -76,6 +76,8 @@ with col_s1:
     src_gstin = st.text_input("Seller GSTIN", o_row.get("gstin", "09ENRPS7521A1ZN"))
     src_mobile = st.text_input("Seller Mobile", o_row.get("contact_number", "9999999999"))
     src_email = st.text_input("Seller Email", o_row.get("email_address", "helloatclassicindustries@gmail.com"))
+    
+    # Left side positioning locked for Classic's master defaults
     invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Comma Separated Override)", value=str(o_row.get("hsn_number", "998349")))
 
 with col_s2:
@@ -220,6 +222,7 @@ st.dataframe(
 st.markdown("<br>", unsafe_allow_html=True)
 st.dataframe(summary_df[["item_no", "part_number", "description", "hsn", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], use_container_width=True, hide_index=True)
 
+# 🚀 FIXED THE CORE BRACING ACCIDENT ERROR DETECTED ON SYSTEM COMPILE LINE
 invoice_payload = {
     "invoice_no": str(invoice_serial_no), "start_date": start_date.strftime("%d-%b-%Y"), "end_date": end_date.strftime("%d-%b-%Y"),
     "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_tagline": str(src_tagline), "src_address": str(src_address),
@@ -249,19 +252,16 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    # Grid Dimensions Calibrated to 540 max point width bounds (320 + 220 = 540)
-    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=)
+    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=[320, 220])
     top_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    # 🔒 Width Fixed: 270 + 270 = 540 total points balance
-    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=)
+    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=[270, 270])
     addr_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(addr_table)
     story.append(Spacer(1, 15))
     
-    # 🔒 Width Fixed: 30 + 140 + 50 + 45 + 45 + 60 + 50 + 70 = 540 total point width balance
     table_content = [[Paragraph("Sl No.", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight/Pc", hdr_style), Paragraph("Total Weight (MT)", hdr_style), Paragraph("Rate/MT", hdr_style), Paragraph("Amount", hdr_style)]]
     for idx, item in enumerate(data["line_items"]):
         table_content.append([Paragraph(str(idx+1), cell_style), Paragraph(f"<b>{item['part_number']}</b> - {item['description']}", cell_left), Paragraph(item["hsn"], cell_style), Paragraph(f"{item['qty']:,}", cell_style), Paragraph(f"{item['wt_pc']:.1f} KG", cell_style), Paragraph(f"{item['total_wt_mt']:.4f}", cell_style), Paragraph(f"{int(item['rate_mt'])}", cell_style), Paragraph(f"Rs. {item['taxable_value']:,.2f}", cell_style)])
@@ -272,7 +272,7 @@ def generate_invoice_pdf_file(data):
     table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
     
-    billing_table = Table(table_content, colWidths=)
+    billing_table = Table(table_content, colWidths=[30, 140, 50, 45, 45, 60, 50, 70])
     billing_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('GRID', (0,0), (-1, start_tot_idx), 0.5, colors.HexColor('#999999')), ('GRID', (6, start_tot_idx+1), (-1, -1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 5)]))
     story.append(billing_table)
     story.append(Spacer(1, 10))
@@ -280,13 +280,12 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Amount Chargeable (in words):</b> {data['total_words']}", meta_style))
     story.append(Spacer(1, 10))
     
-    # 🔒 Width Fixed: 100 + 100 + 80 + 130 + 130 = 540 total points balance
     hsn_content = [[Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]]
     for hsn_code, vals in data["hsn_map"].items():
         hsn_content.append([Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style), Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)])
     hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
-    hsn_table = Table(hsn_content, colWidths=)
+    hsn_table = Table(hsn_content, colWidths=[100, 100, 80, 130, 130])
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(hsn_table)
     story.append(Spacer(1, 10))
@@ -294,8 +293,7 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    # 🔒 Width Fixed: 290 + 250 = 540 total points balance
-    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=)
+    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[290, 250])
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
     
