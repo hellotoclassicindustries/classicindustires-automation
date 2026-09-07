@@ -114,7 +114,6 @@ with col_d2:
     is_filtered_run = selected_display != "ALL COMPONENT DISPATCHED RUNS"
 
 with col_d3:
-    # 🚀 THE TRANSACTION SELECTOR FIX: Defaults to Outward dispatch items only
     selected_txn_type = st.selectbox("Transaction Flow Type", ["Outward", "Inward", "All Transactions"], index=0)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -139,14 +138,15 @@ line_items_payload = []
 hsn_summary_map = {}
 parsed_hsn_override_list = [x.strip() for x in invoice_hsn_input.split(",") if x.strip()]
 
+# ============================================================================
+# 🚀 PURE PART-WISE AGGREGATION & TRANSACTION FILTER LAYER
+# ============================================================================
 try:
     iso_start = start_date.strftime("%Y-%m-%d")
     iso_end = end_date.strftime("%Y-%m-%d")
     
-    # Base query over selected dates
     query_builder = supabase.table("staging_ledger").select("id,date,entry_type,challan_no,part_number,description,qty_nos,hsn_code").gte("date", iso_start).lte("date", iso_end)
     
-    # 🚀 APPLY TRANSACTION FILTER CONSTRAINT LOGIC
     if selected_txn_type != "All Transactions":
         query_builder = query_builder.eq("entry_type", selected_txn_type)
         
@@ -158,21 +158,21 @@ try:
         st.info(f"📋 Operations Notice: Zero production records matched your selection ({selected_txn_type}) between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
         st.stop()
         
-    # Consolidated part aggregation grouping
+    # Group row parameters strictly by part number to dissolve daily line item duplicates
     grouped_ledger = ledger_df.groupby("part_number").agg({
         "qty_nos": "sum",
-        "date": [lambda x: pd.to_datetime(x).min().strftime("%d-%b-%Y"), lambda x: pd.to_datetime(x).max().strftime("%d-%b-%Y")],
+        "date": [lambda x: pd.to_datetime(x).min().strftime("%Y-%m-%d"), lambda x: pd.to_datetime(x).max().strftime("%Y-%m-%d")],
         "hsn_code": "first",
         "description": "first"
     }).reset_index()
     
-    grouped_ledger.columns = ["part_number", "qty_nos", "txn_start_date", "txn_end_date", "hsn_code", "description"]
+    grouped_ledger.columns = ["part_number", "qty_nos", "txn_start_raw", "txn_end_date_raw", "hsn_code", "description"]
     merged_summary = grouped_ledger.sort_values(by="part_number")
     
 except Exception as e:
     merged_summary = pd.DataFrame([
-        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "73259910", "qty_nos": 80, "txn_start_date": start_date.strftime("%d-%b-%Y"), "txn_end_date": end_date.strftime("%d-%b-%Y")},
-        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 669, "txn_start_date": start_date.strftime("%d-%b-%Y"), "txn_end_date": end_date.strftime("%d-%b-%Y")}
+        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "73259910", "qty_nos": 80, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 669, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end}
     ])
 
 for idx, row in merged_summary.iterrows():
@@ -183,7 +183,7 @@ for idx, row in merged_summary.iterrows():
     p_desc = str(row["description"]).upper()
     
     match_part = catalog_df[catalog_df["part_number"] == p_num]
-    p_weight_kg = float(match_part["weight_kg"].values) if not match_part.empty else 28.0
+    p_weight_kg = float(match_part["weight_kg"].values[0]) if not match_part.empty else 28.0
     p_rate = 2650.00
     
     if parsed_hsn_override_list:
@@ -191,7 +191,16 @@ for idx, row in merged_summary.iterrows():
     else:
         hsn_code = str(row.get("hsn_code", "998349")).strip()
         
-    txn_date_range_display = f"{row['txn_start_date']} to {row['txn_end_date']}" if row['txn_start_date'] != row['txn_end_date'] else str(row['txn_start_date'])
+    # 🚀 THE CRITICAL PARSING FIX: Extracted raw scalar string parameters before parsing elements
+    start_raw_str = str(row["txn_start_raw"]).split(" ")[0]
+    end_raw_str = str(row["txn_end_date_raw"]).split(" ")[0]
+    
+    try:
+        s_date = datetime.strptime(start_raw_str, "%Y-%m-%d").strftime("%d-%b-%Y")
+        e_date = datetime.strptime(end_raw_str, "%Y-%m-%d").strftime("%d-%b-%Y")
+        txn_date_range_display = f"{s_date} to {e_date}" if s_date != e_date else str(s_date)
+    except:
+        txn_date_range_display = f"{start_raw_str} to {end_raw_str}"
     
     total_wt_mt = (sim_qty * p_weight_kg) / 1000.0
     taxable_val = total_wt_mt * p_rate
@@ -217,7 +226,6 @@ if not summary_df.empty:
     total_tax_sum = float(summary_df["tax_amt"].sum())
     grand_invoice_total = total_taxable_subtotal + total_tax_sum
     
-    # 🚀 Dynamic Word Parser Engine Converts INR Subtotals flawlessly
     try:
         rupees_integral = int(grand_invoice_total)
         paise_fractional = int(round((grand_invoice_total - rupees_integral) * 100))
@@ -225,14 +233,14 @@ if not summary_df.empty:
         invoice_total_words = f"{words_main} Rupees And {num2words(paise_fractional, lang='en_IN').title().replace('-', ' ')} Paise Only." if paise_fractional > 0 else f"{words_main} Rupees Only."
         tax_total_words = f"{num2words(int(total_tax_sum), lang='en_IN').title().replace('-', ' ')} Rupees Only."
     except:
-        invoice_total_words, tax_total_words = "Amount Calculated Dynamically Only.", "Calculated Automatically Only."
+        invoice_total_words, tax_total_words = "Amount Calculated Dynamically.", "Calculated Automatically."
     
     st.dataframe(
-        summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
+        summary_df[["item_no", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
         column_config={
-            "item_no": "Sr No", "txn_date": "📅 Outward Transaction Bounds", "part_number": "Part Number", 
-            "description": "Part Description", "qty": "Total Quantity (Nos)", "wt_pc": "Weight/Pc (KG)", 
-            "total_wt_mt": "Total Tonnage (MT)", "rate_mt": "Rate/MT", "taxable_value": "Amount"
+            "item_no": "Sr No", "part_number": "Part Number", "description": "Part Description", 
+            "qty": "Total Quantity (Nos)", "wt_pc": "Weight/Pc (KG)", "total_wt_mt": "Total Tonnage (MT)", 
+            "rate_mt": "Rate/MT", "taxable_value": "Amount"
         },
         use_container_width=True, hide_index=True
     )
@@ -326,4 +334,4 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_containe
         with open(f_path, "rb") as f:
             st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_payload['invoice_no']}.pdf", mime="application/pdf", use_container_width=True)
         st.success("🎉 Multi-item tax invoice compiled successfully! Click download above.")
-    except Exception as e: st.error(f"❌ Compilation crash: {str(e)}")
+    except Exception as e: st.error(f"❌ Structural Compilation Exception: {str(e)}")
