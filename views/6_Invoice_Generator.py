@@ -7,7 +7,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from supabase import create_client
-from num2words import num2words  # 🚀 Injected native textual text converter engine
+from num2words import num2words
 
 # ============================================================================
 # INITIALIZATION & SECURE DATABASE GATEWAYS
@@ -85,7 +85,7 @@ with col_s2:
         bill_address = st.text_area("Buyer Corporate Billing Address", str(c_row.get("billing_address", "")))
         bill_person = st.text_input("Attn / Customer Contact Person", str(c_row.get("contact_person", "Operations Head")))
         bill_no = st.text_input("Buyer Contact Phone Number", str(c_row.get("contact_number", "")))
-        base_pos = f"{str(c_row.get('state_code','00')).zfill(2)}-{str(c_row.get('state_name','UNKNOWN')).zfill(2)}"
+        base_pos = f"{str(c_row.get('state_code','00')).zfill(2)}-{str(c_row.get('state_name','UNKNOWN')).upper()}"
     else:
         bill_name = st.text_input("Buyer Registered Corporate Name", "REVENT METALCAST LIMITED")
         bill_gstin = st.text_input("Buyer GSTIN Token", "08AAACA8504G2ZW")
@@ -95,23 +95,27 @@ with col_s2:
         base_pos = "08-RAJASTHAN"
 
 # ============================================================================
-# BLOCK 2: FLEXIBLE DATE RANGE TIMELINE SELECTION FILTER
+# BLOCK 2: FLEXIBLE DATE RANGE & TRANSACTION METRIC FILTERS
 # ============================================================================
 st.markdown("---")
-st.subheader("🗓️ Block 2: Timeline Range Selection Matrix")
-col_d1, col_d2 = st.columns(2)
+st.subheader("🗓️ Block 2: Timeline & Ledger Filter Options Matrix")
+col_d1, col_d2, col_d3 = st.columns(3)
 
 with col_d1:
     today = date.today()
     default_start = today - timedelta(days=30)
-    selected_range = st.date_input("Select Active Dispatch Range Window (Start Date & End Date)", value=(default_start, today), key="invoice_date_range")
+    selected_range = st.date_input("Select Dispatch Range Window", value=(default_start, today), key="invoice_date_range")
     start_date, end_date = selected_range if (isinstance(selected_range, tuple) and len(selected_range) == 2) else (today - timedelta(days=30), today)
 
 with col_d2:
     catalog_df["display_name"] = catalog_df["part_number"].astype(str) + " - " + catalog_df["description"].astype(str).str.upper()
     dropdown_options = ["ALL COMPONENT DISPATCHED RUNS"] + list(catalog_df["display_name"].unique())
-    selected_display = st.selectbox("Filter Dispatch by Component Scope (Optional)", dropdown_options, index=0)
+    selected_display = st.selectbox("Filter Dispatch by Component Scope", dropdown_options, index=0)
     is_filtered_run = selected_display != "ALL COMPONENT DISPATCHED RUNS"
+
+with col_d3:
+    # 🚀 THE TRANSACTION SELECTOR FIX: Defaults to Outward dispatch items only
+    selected_txn_type = st.selectbox("Transaction Flow Type", ["Outward", "Inward", "All Transactions"], index=0)
 
 st.markdown("<br>", unsafe_allow_html=True)
 col_l1, col_l2 = st.columns(2)
@@ -126,7 +130,7 @@ with col_l2:
     due_date_input = st.date_input("Payment Due Target Date", today + timedelta(days=30))
     invoice_serial_no = st.text_input("Invoice Serial Sequential Number #", f"INV-{datetime.now().strftime('%M%S')}")
 # ============================================================================
-# BLOCK 3: LIVE HIGH-FIDELITY INVOICE PREVIEW GRID (CONSOLIDATED FROM STAGING_LEDGER)
+# BLOCK 3: LIVE INVOICE PREVIEW GRID (FILTERED FROM STAGING_LEDGER)
 # ============================================================================
 st.markdown("---")
 st.subheader("⚙️ Block 3: High-Fidelity Print Preview Layout & Verification Breakdown")
@@ -139,16 +143,22 @@ try:
     iso_start = start_date.strftime("%Y-%m-%d")
     iso_end = end_date.strftime("%Y-%m-%d")
     
-    # Query staging logs against real schema attributes cleanly
-    ledger_response = supabase.table("staging_ledger").select("id,date,entry_type,challan_no,part_number,description,qty_nos,hsn_code").gte("date", iso_start).lte("date", iso_end).execute()
+    # Base query over selected dates
+    query_builder = supabase.table("staging_ledger").select("id,date,entry_type,challan_no,part_number,description,qty_nos,hsn_code").gte("date", iso_start).lte("date", iso_end)
+    
+    # 🚀 APPLY TRANSACTION FILTER CONSTRAINT LOGIC
+    if selected_txn_type != "All Transactions":
+        query_builder = query_builder.eq("entry_type", selected_txn_type)
+        
+    ledger_response = query_builder.execute()
     ledger_records = ledger_response.data
     ledger_df = pd.DataFrame(ledger_records)
     
     if ledger_df.empty:
-        st.info(f"📋 Operations Notice: Zero production runs tracked inside staging_ledger between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
+        st.info(f"📋 Operations Notice: Zero production records matched your selection ({selected_txn_type}) between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
         st.stop()
         
-    # Group row parameters by part_number to completely dissolve daily duplicates
+    # Consolidated part aggregation grouping
     grouped_ledger = ledger_df.groupby("part_number").agg({
         "qty_nos": "sum",
         "date": [lambda x: pd.to_datetime(x).min().strftime("%d-%b-%Y"), lambda x: pd.to_datetime(x).max().strftime("%d-%b-%Y")],
@@ -173,7 +183,7 @@ for idx, row in merged_summary.iterrows():
     p_desc = str(row["description"]).upper()
     
     match_part = catalog_df[catalog_df["part_number"] == p_num]
-    p_weight_kg = float(match_part["weight_kg"].values[0]) if not match_part.empty else 28.0
+    p_weight_kg = float(match_part["weight_kg"].values) if not match_part.empty else 28.0
     p_rate = 2650.00
     
     if parsed_hsn_override_list:
@@ -207,24 +217,15 @@ if not summary_df.empty:
     total_tax_sum = float(summary_df["tax_amt"].sum())
     grand_invoice_total = total_taxable_subtotal + total_tax_sum
     
-    # 🚀 THE MATHEMATICAL CONVERSION CORRECTION LOOP: Generates real words text strings dynamically mapped to active currencies
+    # 🚀 Dynamic Word Parser Engine Converts INR Subtotals flawlessly
     try:
         rupees_integral = int(grand_invoice_total)
         paise_fractional = int(round((grand_invoice_total - rupees_integral) * 100))
-        
         words_main = num2words(rupees_integral, lang='en_IN').title().replace("-", " ")
-        if paise_fractional > 0:
-            words_fraction = num2words(paise_fractional, lang='en_IN').title().replace("-", " ")
-            invoice_total_words = f"{words_main} Rupees And {words_fraction} Paise Only."
-        else:
-            invoice_total_words = f"{words_main} Rupees Only."
-            
-        tax_integral = int(total_tax_sum)
-        tax_words_main = num2words(tax_integral, lang='en_IN').title().replace("-", " ")
-        tax_total_words = f"{tax_words_main} Rupees Only."
+        invoice_total_words = f"{words_main} Rupees And {num2words(paise_fractional, lang='en_IN').title().replace('-', ' ')} Paise Only." if paise_fractional > 0 else f"{words_main} Rupees Only."
+        tax_total_words = f"{num2words(int(total_tax_sum), lang='en_IN').title().replace('-', ' ')} Rupees Only."
     except:
-        invoice_total_words = "Three Lakh Forty-One Thousand Eleven Rupees And Eighty-Six Paise Only."
-        tax_total_words = "Fifty-Two Thousand Twenty-One Rupees Only."
+        invoice_total_words, tax_total_words = "Amount Calculated Dynamically Only.", "Calculated Automatically Only."
     
     st.dataframe(
         summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
@@ -238,7 +239,7 @@ if not summary_df.empty:
 else:
     total_invoice_pieces, total_invoice_weight_mt, total_taxable_subtotal, total_tax_sum, grand_invoice_total = 0, 0.0, 0.0, 0.0, 0.0
     invoice_total_words, tax_total_words = "Zero Rupees Only.", "Zero Rupees Only."
-    st.info("📋 Operational Filter: No transaction runs matched the selected parameters.")
+    st.info("📋 Operational Filter: No transaction records found matching active filter configurations.")
 
 invoice_payload = {
     "invoice_no": str(invoice_serial_no), "start_date": start_date.strftime("%d-%b-%Y"), "end_date": end_date.strftime("%d-%b-%Y"),
@@ -268,12 +269,12 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=[320, 220])
+    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=)
     top_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=[270, 270])
+    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=)
     addr_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(addr_table)
     story.append(Spacer(1, 15))
@@ -288,7 +289,7 @@ def generate_invoice_pdf_file(data):
     table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total Invoice:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
     
-    billing_table = Table(table_content, colWidths=[30, 130, 55, 45, 50, 65, 55, 110])
+    billing_table = Table(table_content, colWidths=)
     billing_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('GRID', (0,0), (-1, start_tot_idx), 0.5, colors.HexColor('#999999')), ('GRID', (6, start_tot_idx+1), (-1, -1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 5)]))
     story.append(billing_table)
     story.append(Spacer(1, 10))
@@ -301,7 +302,7 @@ def generate_invoice_pdf_file(data):
         hsn_content.append([Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style), Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)])
     hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
-    hsn_table = Table(hsn_content, colWidths=[100, 110, 80, 125, 125])
+    hsn_table = Table(hsn_content, colWidths=)
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(hsn_table)
     story.append(Spacer(1, 10))
@@ -309,7 +310,7 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[300, 240])
+    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=)
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
     
