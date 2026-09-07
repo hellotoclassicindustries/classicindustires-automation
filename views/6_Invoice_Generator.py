@@ -110,7 +110,7 @@ with col_s2:
 # BLOCK 2: FLEXIBLE DATE RANGE & TRANSACTION METRIC FILTERS
 # ============================================================================
 st.markdown("---")
-st.subheader("🗓️ Block 2: Timeline & Ledger Filter Options Matrix")
+st.subheader("🗓️ TimelineFilters")
 col_d1, col_d2, col_d3 = st.columns(3)
 
 with col_d1:
@@ -144,7 +144,7 @@ with col_l2:
 # BLOCK 3: LIVE INVOICE PREVIEW GRID (FILTERED FROM STAGING_LEDGER)
 # ============================================================================
 st.markdown("---")
-st.subheader("⚙️ Block 3: High-Fidelity Print Preview Layout & Verification Breakdown")
+st.subheader("⚙️ PrintPreview")
 
 line_items_payload = []
 hsn_summary_map = {}
