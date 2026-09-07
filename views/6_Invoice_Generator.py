@@ -134,11 +134,14 @@ line_items_payload = []
 hsn_summary_map = {}
 parsed_hsn_list = [x.strip() for x in invoice_hsn_input.split(",") if x.strip()]
 
+# ============================================================================
+# 🚀 LIVE RELATIONAL AGGREGATOR FROM PRODUCTION STAGING_LEDGER
+# ============================================================================
 try:
-    iso_start = start_date.strftime("%Y-%m-%d")
-    iso_end = end_date.strftime("%Y-%m-%d")
+    iso_start = start_date.strftime("%Y-%m-%d 00:00:00")
+    iso_end = end_date.strftime("%Y-%m-%d 23:59:59")
     
-    # Query staging_ledger over exact selected date window bounds cleanly
+    # 🚀 THE DATE FILTER RESOLUTION: Queries the continuous timeline using absolute chronological limits
     ledger_response = supabase.table("staging_ledger").select("*").gte("production_date", iso_start).lte("production_date", iso_end).execute()
     ledger_records = ledger_response.data
     ledger_df = pd.DataFrame(ledger_records)
@@ -147,7 +150,6 @@ try:
         st.info(f"📋 Operations Notice: Zero production runs tracked inside staging_ledger between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
         st.stop()
         
-    # Group row parameters by date and part to generate clean line-by-line item rows
     grouped_ledger = ledger_df.groupby(["production_date", "part_number"]).agg({"pieces_completed": "sum"}).reset_index()
     grouped_ledger = grouped_ledger.sort_values(by="production_date")
     merged_summary = pd.merge(grouped_ledger, catalog_df, on="part_number", how="inner")
@@ -160,6 +162,7 @@ except Exception as e:
 
 for idx, row in merged_summary.iterrows():
     p_num = str(row["part_number"])
+    # Filter constraints check
     if is_filtered_run and p_num.upper() not in selected_display.upper(): continue
         
     sim_qty = int(row["pieces_completed"])
@@ -167,27 +170,17 @@ for idx, row in merged_summary.iterrows():
     p_weight_kg = float(row["weight_kg"])
     p_rate = 2650.00
     
-    hsn_code = parsed_hsn_list[idx] if (len(parsed_hsn_list) > 0 and idx < len(parsed_hsn_list)) else "998349"
-    txn_date_str = datetime.strptime(str(row["production_date"]), "%Y-%m-%d").strftime("%d-%b-%Y") if "-" in str(row["production_date"]) else str(row["production_date"])
+    hsn_code = parsed_hsn_list[len(line_items_payload) % len(parsed_hsn_list)] if parsed_hsn_list else "998349"
+    txn_date_str = datetime.strptime(str(row["production_date"]).split("T")[0], "%Y-%m-%d").strftime("%d-%b-%Y") if "-" in str(row["production_date"]) else str(row["production_date"])
     
-    # 🚀 ACCURATE TONNAGE FORMULATION: (Pieces * Weight in Kg) / 1000 = Tons
     total_wt_mt = (sim_qty * p_weight_kg) / 1000.0
     taxable_val = total_wt_mt * p_rate
     tax_amt = taxable_val * 0.18
     
     item_node = {
-        "item_no": len(line_items_payload) + 1, 
-        "txn_date": txn_date_str,
-        "part_number": p_num, 
-        "description": p_desc, 
-        "hsn": hsn_code,
-        "qty": sim_qty, 
-        "wt_pc": p_weight_kg, 
-        "total_wt_mt": total_wt_mt, 
-        "rate_mt": p_rate,
-        "taxable_value": taxable_val, 
-        "tax_amt": tax_amt, 
-        "gross_amount": taxable_val + tax_amt
+        "item_no": len(line_items_payload) + 1, "txn_date": txn_date_str, "part_number": p_num, "description": p_desc, "hsn": hsn_code,
+        "qty": sim_qty, "wt_pc": p_weight_kg, "total_wt_mt": total_wt_mt, "rate_mt": p_rate,
+        "taxable_value": taxable_val, "tax_amt": tax_amt, "gross_amount": taxable_val + tax_amt
     }
     line_items_payload.append(item_node)
     
@@ -196,27 +189,28 @@ for idx, row in merged_summary.iterrows():
     hsn_summary_map[hsn_code]["tax_amount"] += tax_amt
 
 summary_df = pd.DataFrame(line_items_payload)
-total_invoice_pieces = int(summary_df["qty"].sum()) if not summary_df.empty else 0
-total_invoice_weight_mt = float(summary_df["total_wt_mt"].sum()) if not summary_df.empty else 0.0
-total_taxable_subtotal = float(summary_df["taxable_value"].sum()) if not summary_df.empty else 0.0
-total_tax_sum = float(summary_df["tax_amt"].sum()) if not summary_df.empty else 0.0
-grand_invoice_total = total_taxable_subtotal + total_tax_sum
 
-invoice_total_words = "Five Lakh Twenty-Five Thousand One Hundred Twenty-Two Rupees Only."
-tax_total_words = "Ninety-Four Thousand Five Hundred Twenty-Two Rupees Only."
+# 🚀 THE DROPDOWN CRASH PROTECTION LAYER: Pre-verifies dataframe index limits to prevent None axis drop errors
+if not summary_df.empty:
+    total_invoice_pieces = int(summary_df["qty"].sum())
+    total_invoice_weight_mt = float(summary_df["total_wt_mt"].sum())
+    total_taxable_subtotal = float(summary_df["taxable_value"].sum())
+    total_tax_sum = float(summary_df["tax_amt"].sum())
+    grand_invoice_total = total_taxable_subtotal + total_tax_sum
+    
+    st.dataframe(
+        summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
+        column_config={
+            "item_no": "Sr No", "txn_date": "📅 Date of Transaction", "part_number": "Part Number", 
+            "description": "Part Description", "qty": "Quantity", "wt_pc": "Weight/Pc (KG)", 
+            "total_wt_mt": "Total Weight (In Tons)", "rate_mt": "Rate", "taxable_value": "Amount"
+        },
+        use_container_width=True, hide_index=True
+    )
+else:
+    total_invoice_pieces, total_invoice_weight_mt, total_taxable_subtotal, total_tax_sum, grand_invoice_total = 0, 0.0, 0.0, 0.0, 0.0
+    st.info("📋 Operational Filter: No transaction runs matched the selected parameters.")
 
-# 🚀 DISPLAY THE LIVE PREVIEW REPLICATED MATRICES GRID ON YOUR SCREEN WINDOW
-st.dataframe(
-    summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
-    column_config={
-        "item_no": "Sr No", "txn_date": "📅 Date of Transaction", "part_number": "Part Number", 
-        "description": "Part Description", "qty": "Quantity", "wt_pc": "Weight/Pc (KG)", 
-        "total_wt_mt": "Total Weight (In Tons)", "rate_mt": "Rate", "taxable_value": "Amount"
-    },
-    use_container_width=True, hide_index=True
-)
-
-# 🚀 THE SYNTAX FIX: Clean single curly braces dictionary definition passes correctly to Part 4
 invoice_payload = {
     "invoice_no": str(invoice_serial_no), "start_date": start_date.strftime("%d-%b-%Y"), "end_date": end_date.strftime("%d-%b-%Y"),
     "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_address": str(src_address),
@@ -224,7 +218,7 @@ invoice_payload = {
     "bill_contact_person": str(bill_person), "bill_address": str(bill_address), "bill_gstin": str(bill_gstin),
     "bill_mobile": str(bill_no), "ship_address": str(ship_addr_override), "line_items": line_items_payload,
     "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
-    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map,
+    "total_words": "Five Lakh Twenty-Five Thousand One Hundred Twenty-Two Rupees Only.", "tax_total_words": "Ninety-Four Thousand Five Hundred Twenty-Two Rupees Only.", "hsn_map": hsn_summary_map,
     "total_invoice_weight_mt": total_invoice_weight_mt
 }
 # ============================================================================
@@ -246,12 +240,12 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("TAX INVOICE", title_style))
     story.append(Spacer(1, 10))
     
-    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=[320, 220])
+    top_table = Table([[Paragraph(f"<b>{data['src_name']}</b><br/>{data['src_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['src_gstin']}", meta_style), Paragraph(f"<b>Invoice #:</b> {data['invoice_no']}<br/><b>Invoice Date:</b> {data['start_date']}<br/><b>Place of Supply:</b> {data['place_of_supply']}", meta_style)]], colWidths=)
     top_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(top_table)
     story.append(Spacer(1, 10))
     
-    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=[270, 270])
+    addr_table = Table([[Paragraph(f"<b>Buyer (Bill to):</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN:</b> {data['bill_gstin']}", meta_style), Paragraph(f"<b>Consignee (Ship to):</b><br/>{data['ship_address'].replace('\n','<br/>')}", meta_style)]], colWidths=)
     addr_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(addr_table)
     story.append(Spacer(1, 15))
@@ -266,7 +260,7 @@ def generate_invoice_pdf_file(data):
     table_content.append(["", "", "", "", "", "", Paragraph("<b>IGST 18%:</b>", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     table_content.append(["", "", "", "", "", "", Paragraph("<b>Total:</b>", cell_style), Paragraph(f"<b>Rs. {data['grand_total']:,.2f}</b>", cell_style)])
     
-    billing_table = Table(table_content, colWidths=[30, 140, 50, 45, 45, 60, 50, 70])
+    billing_table = Table(table_content, colWidths=)
     billing_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('GRID', (0,0), (-1, start_tot_idx), 0.5, colors.HexColor('#999999')), ('GRID', (6, start_tot_idx+1), (-1, -1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 5)]))
     story.append(billing_table)
     story.append(Spacer(1, 10))
@@ -279,7 +273,7 @@ def generate_invoice_pdf_file(data):
         hsn_content.append([Paragraph(hsn_code, cell_style), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_style), Paragraph("18%", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_style)])
     hsn_content.append([Paragraph("<b>TOTAL</b>", cell_style), Paragraph(f"Rs. {data['taxable_amount']:,.2f}", cell_style), Paragraph("", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style), Paragraph(f"Rs. {data['igst']:,.2f}", cell_style)])
     
-    hsn_table = Table(hsn_content, colWidths=[100, 100, 80, 130, 130])
+    hsn_table = Table(hsn_content, colWidths=)
     hsn_table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f5f5f5')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#999999')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(hsn_table)
     story.append(Spacer(1, 10))
@@ -287,7 +281,7 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph(f"<b>Tax Amount (in words):</b> {data['tax_total_words']}", meta_style))
     story.append(Spacer(1, 15))
     
-    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=[290, 250])
+    footer_table = Table([[Paragraph("<b>Company's Bank Details:</b><br/>Bank Name : <b>Indian Bank</b><br/>A/c No. : <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_style), Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RText', parent=meta_style, alignment=2))]], colWidths=)
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbbbbb')), ('PADDING', (0,0), (-1,-1), 6)]))
     story.append(footer_table)
     
