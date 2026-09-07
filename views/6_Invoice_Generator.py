@@ -333,8 +333,8 @@ def generate_invoice_pdf_file(data):
     
     table_content = [[Paragraph("SI<br/>No", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per<br/>Pieces", hdr_style), Paragraph("Total Weight<br/>In Ton", hdr_style), Paragraph("Per<br/>Ton<br/>Rate", hdr_style), Paragraph("Amount", hdr_style)]]
     for idx, item in enumerate(data["line_items"]):
-        table_content.append([Paragraph(str(idx+1), cell_center), Paragraph(f"<b>{item['part_number']}</b><br/>{item['description']}", cell_left), Paragraph(item["hsn"], cell_center), Paragraph(f"{item['qty']:,}", cell_center), Paragraph(f"{item['wt_pc']:.1f}KG", cell_center), Paragraph(f"{item['total_wt_mt']:.4f}", cell_center), Paragraph(f"{int(item['rate_mt'])}", cell_center), Paragraph(f"<b>₹ {item['taxable_value']:,.2f}</b>", cell_right)])
-    table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{data['total_pieces']}</b>", cell_center), "", Paragraph(f"<b>{data['total_invoice_weight_mt']:.4f}</b>", cell_center), "", Paragraph(f"<b>₹ {data['taxable_amount']:,.2f}</b>", cell_right_bold)])
+        table_content.append([Paragraph(str(idx+1), cell_center), Paragraph(f"<b>{item['part_number']}</b><br/>{item['description']}", cell_left), Paragraph(item["hsn"], cell_center), Paragraph(f"{item['qty']:,}", cell_center), Paragraph(f"{item['wt_pc']:.1f}KG", cell_center), Paragraph(f"{item['total_wt_mt']:.4f}", cell_center), Paragraph(f"{int(item['rate_mt'])}", cell_center), Paragraph(f"<b>Rs. {item['taxable_value']:,.2f}</b>", cell_right)])
+    table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{data['total_pieces']}</b>", cell_center), "", Paragraph(f"<b>{data['total_invoice_weight_mt']:.4f}</b>", cell_center), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold)])
     
     item_table = Table(table_content, colWidths=[25, 175, 55, 45, 50, 55, 45, 90], repeatRows=1)
     item_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)]))
@@ -346,8 +346,8 @@ def generate_invoice_pdf_file(data):
         [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
     ]
     for hsn_code, vals in data["hsn_map"].items():
-        summary_data.append([Paragraph(hsn_code, cell_center), Paragraph(f"₹ {vals['taxable_value']:,.2f}", cell_right), Paragraph("18%", cell_center), Paragraph(f"₹ {vals['tax_amount']:,.2f}", cell_right), Paragraph(f"₹ {vals['tax_amount']:,.2f}", cell_right)])
-    summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>₹ {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>₹ {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>₹ {data['igst']:,.2f}</b>", cell_right_bold)])
+        summary_data.append([Paragraph(hsn_code, cell_center), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_right), Paragraph("18%", cell_center), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_right), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_right)])
+    summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold)])
     
     summary_table = Table(summary_data, colWidths=[100, 110, 80, 125, 125])
     summary_table.setStyle(TableStyle([('SPAN', (0,0), (3,0)), ('SPAN', (0,1), (4,1)), ('GRID', (0,2), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)]))
