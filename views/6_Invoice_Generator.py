@@ -274,7 +274,7 @@ if not summary_df.empty:
             "description": "Part Description", "qty": "Total Quantity (Nos)", "wt_pc": "Weight/Pc (KG)", 
             "total_wt_mt": "Total Tonnage (MT)", "rate_mt": "Rate/MT", "taxable_value": "Amount"
         },
-        use_container_width=True, hide_index=True
+        width="stretch", hide_index=True
     )
 else:
     total_invoice_pieces, total_invoice_weight_mt, total_taxable_subtotal, total_tax_sum, grand_invoice_total = 0, 0.0, 0.0, 0.0, 0.0
@@ -323,7 +323,7 @@ def generate_invoice_pdf_file(data):
         [Paragraph(f"<b>Buyer (Bill to)</b><br/><b>{data['bill_name']}</b><br/>{data['bill_address'].replace('\n','<br/>')}<br/><b>GSTIN/UIN:</b> {data['bill_gstin']}", meta_body), Paragraph("Dispatched through", meta_lbl), Paragraph("Destination", meta_lbl)],
         ["", Paragraph("Terms of Delivery", meta_lbl), ""]
     ]
-    top_table = Table(header_data, colWidths=)
+    top_table = Table(header_data, colWidths=[270, 135, 135])
     top_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')),
         ('SPAN', (0,0), (0,1)), ('SPAN', (0,2), (0,4)), ('SPAN', (0,5), (0,6)), ('SPAN', (1,6), (2,6)), ('PADDING', (0,0), (-1,-1), 4)
@@ -336,7 +336,7 @@ def generate_invoice_pdf_file(data):
         table_content.append([Paragraph(str(idx+1), cell_center), Paragraph(f"<b>{item['part_number']}</b><br/>{item['description']}", cell_left), Paragraph(item["hsn"], cell_center), Paragraph(f"{item['qty']:,}", cell_center), Paragraph(f"{item['wt_pc']:.1f}KG", cell_center), Paragraph(f"{item['total_wt_mt']:.4f}", cell_center), Paragraph(f"{int(item['rate_mt'])}", cell_center), Paragraph(f"<b>₹ {item['taxable_value']:,.2f}</b>", cell_right)])
     table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{data['total_pieces']}</b>", cell_center), "", Paragraph(f"<b>{data['total_invoice_weight_mt']:.4f}</b>", cell_center), "", Paragraph(f"<b>₹ {data['taxable_amount']:,.2f}</b>", cell_right_bold)])
     
-    item_table = Table(table_content, colWidths=, repeatRows=1)
+    item_table = Table(table_content, colWidths=[25, 175, 55, 45, 50, 55, 45, 90], repeatRows=1)
     item_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(item_table)
     
@@ -349,7 +349,7 @@ def generate_invoice_pdf_file(data):
         summary_data.append([Paragraph(hsn_code, cell_center), Paragraph(f"₹ {vals['taxable_value']:,.2f}", cell_right), Paragraph("18%", cell_center), Paragraph(f"₹ {vals['tax_amount']:,.2f}", cell_right), Paragraph(f"₹ {vals['tax_amount']:,.2f}", cell_right)])
     summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>₹ {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>₹ {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>₹ {data['igst']:,.2f}</b>", cell_right_bold)])
     
-    summary_table = Table(summary_data, colWidths=)
+    summary_table = Table(summary_data, colWidths=[100, 110, 80, 125, 125])
     summary_table.setStyle(TableStyle([('SPAN', (0,0), (3,0)), ('SPAN', (0,1), (4,1)), ('GRID', (0,2), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)]))
     story.append(summary_table)
     story.append(Spacer(1, 6))
@@ -361,7 +361,7 @@ def generate_invoice_pdf_file(data):
     decl_p = Paragraph("<b>Declaration</b><br/>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", meta_body)
     sign_p = Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RSign', parent=meta_body, alignment=2))
     
-    footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=)
+    footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=[300, 240])
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 5)]))
     story.append(footer_table)
     story.append(Spacer(1, 6))
@@ -375,7 +375,7 @@ def generate_invoice_pdf_file(data):
 st.markdown("---")
 st.subheader("📥 Download/Print Center")
 
-if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_container_width=True):
+if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", width="stretch"):
     if not supabase:
         st.error("❌ Cannot complete operation: Database connection is unavailable.")
     elif summary_df.empty:
@@ -404,4 +404,4 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", use_containe
                 st.warning("📋 Cloud Audit Notice: PDF compiled successfully but history row log bypass active.")
             
             with open(f_path, "rb") as f:
-                st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", mime="application/pdf", use_container_width=True)
+                st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", mime="application/pdf", width="stretch")
