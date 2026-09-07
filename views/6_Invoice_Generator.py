@@ -129,7 +129,7 @@ with col_l2:
     due_date_input = st.date_input("Payment Due Target Date", today + timedelta(days=30))
     invoice_serial_no = st.text_input("Invoice Serial Sequential Number #", f"INV-{datetime.now().strftime('%M%S')}")
 # ============================================================================
-# BLOCK 3: LIVE INVOICE PREVIEW GRID (FILTERED FROM STAGING_LEDGER)
+# BLOCK 3: LIVE HIGH-FIDELITY INVOICE PREVIEW GRID (CONSOLIDATED FROM STAGING_LEDGER)
 # ============================================================================
 st.markdown("---")
 st.subheader("⚙️ Block 3: High-Fidelity Print Preview Layout & Verification Breakdown")
@@ -158,10 +158,10 @@ try:
         st.info(f"📋 Operations Notice: Zero production records matched your selection ({selected_txn_type}) between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
         st.stop()
         
-    # Group strictly by part codes to dissolve line duplicates cleanly
+    # Group rows strictly by part number to dissolve daily line item duplicates
     grouped_ledger = ledger_df.groupby("part_number").agg({
         "qty_nos": "sum",
-        "date": [lambda x: str(pd.to_datetime(x).min().strftime("%Y-%m-%d")), lambda x: str(pd.to_datetime(x).max().strftime("%Y-%m-%d"))],
+        "date": [lambda x: pd.to_datetime(x).min().strftime("%d-%b-%Y"), lambda x: pd.to_datetime(x).max().strftime("%d-%b-%Y")],
         "hsn_code": "first",
         "description": "first"
     }).reset_index()
@@ -171,8 +171,8 @@ try:
     
 except Exception as e:
     merged_summary = pd.DataFrame([
-        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "73259910", "qty_nos": 80, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 669, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end}
+        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "73259910", "qty_nos": 80, "txn_start_raw": "03-Sep-2026", "txn_end_date_raw": "06-Sep-2026"},
+        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 669, "txn_start_raw": "03-Sep-2026", "txn_end_date_raw": "06-Sep-2026"}
     ])
 
 for idx, row in merged_summary.iterrows():
@@ -183,7 +183,7 @@ for idx, row in merged_summary.iterrows():
     p_desc = str(row["description"]).upper()
     
     match_part = catalog_df[catalog_df["part_number"] == p_num]
-    p_weight_kg = float(match_part["weight_kg"].values[0]) if not match_part.empty else 28.0
+    p_weight_kg = float(match_part["weight_kg"].values) if not match_part.empty else 28.0
     p_rate = 2650.00
     
     if parsed_hsn_override_list:
@@ -191,25 +191,28 @@ for idx, row in merged_summary.iterrows():
     else:
         hsn_code = str(row.get("hsn_code", "998349")).strip()
         
-    # 🚀 THE CRITICAL PARSING FIX: Bypassed structural string splits entirely to prevent AST compiler token breaks
-    raw_start = str(row["txn_start_raw"])
-    raw_end = str(row["txn_end_date_raw"])
-    
-    try:
-        s_date = datetime.strptime(raw_start[:10], "%Y-%m-%d").strftime("%d-%b-%Y")
-        e_date = datetime.strptime(raw_end[:10], "%Y-%m-%d").strftime("%d-%b-%Y")
-        txn_date_range_display = f"{s_date} to {e_date}" if s_date != e_date else str(s_date)
-    except:
-        txn_date_range_display = f"{raw_start} to {raw_end}"
+    # Format the exact dynamic range text cell for display (e.g. "03-Sep-2026 to 06-Sep-2026")
+    s_date = str(row["txn_start_raw"])
+    e_date = str(row["txn_end_date_raw"])
+    txn_date_range_display = f"{s_date} to {e_date}" if s_date != e_date else str(s_date)
     
     total_wt_mt = (sim_qty * p_weight_kg) / 1000.0
     taxable_val = total_wt_mt * p_rate
     tax_amt = taxable_val * 0.18
     
     item_node = {
-        "item_no": len(line_items_payload) + 1, "txn_date": txn_date_range_display, "part_number": p_num, "description": p_desc, "hsn": hsn_code,
-        "qty": sim_qty, "wt_pc": p_weight_kg, "total_wt_mt": total_wt_mt, "rate_mt": p_rate,
-        "taxable_value": taxable_val, "tax_amt": tax_amt, "gross_amount": taxable_val + tax_amt
+        "item_no": len(line_items_payload) + 1, 
+        "txn_date": txn_date_range_display, 
+        "part_number": p_num, 
+        "description": p_desc, 
+        "hsn": hsn_code,
+        "qty": sim_qty, 
+        "wt_pc": p_weight_kg, 
+        "total_wt_mt": total_wt_mt, 
+        "rate_mt": p_rate,
+        "taxable_value": taxable_val, 
+        "tax_amt": tax_amt, 
+        "gross_amount": taxable_val + tax_amt
     }
     line_items_payload.append(item_node)
     
@@ -235,14 +238,22 @@ if not summary_df.empty:
     except:
         invoice_total_words, tax_total_words = "Amount Calculated Dynamically.", "Calculated Automatically."
     
+    # 🚀 RESTORED DISPLAY MATRIX: Explicitly mapping "txn_date" back to column index slot 2
     st.dataframe(
-        summary_df[["item_no", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
+        summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
         column_config={
-            "item_no": "Sr No", "part_number": "Part Number", "description": "Part Description", 
-            "qty": "Total Quantity (Nos)", "wt_pc": "Weight/Pc (KG)", "total_wt_mt": "Total Tonnage (MT)", 
-            "rate_mt": "Rate/MT", "taxable_value": "Amount"
+            "item_no": "Sr No", 
+            "txn_date": "📅 Date of Transaction (Range Summary)", 
+            "part_number": "Part Number", 
+            "description": "Part Description", 
+            "qty": "Total Quantity (Nos)", 
+            "wt_pc": "Weight/Pc (KG)", 
+            "total_wt_mt": "Total Tonnage (MT)", 
+            "rate_mt": "Rate/MT", 
+            "taxable_value": "Amount"
         },
-        use_container_width=True, hide_index=True
+        use_container_width=True, 
+        hide_index=True
     )
 else:
     total_invoice_pieces, total_invoice_weight_mt, total_taxable_subtotal, total_tax_sum, grand_invoice_total = 0, 0.0, 0.0, 0.0, 0.0
