@@ -62,6 +62,8 @@ st.title("🏭 Automated GST Commercial Tax Invoice Platform")
 st.markdown("---")
 
 def clean_db_val(row_dict, key_name, fallback_text):
+    if not isinstance(row_dict, dict):
+        return fallback_text
     val = row_dict.get(key_name)
     if val is None or str(val).strip() == "" or str(val).lower() == "none":
         return fallback_text
@@ -88,12 +90,13 @@ def calculate_next_db_serial(target_date):
                 parts = item["invoice_no"].split("/")
                 if len(parts) == 3:
                     try:
-                        numeric_values.append(int(parts))
+                        numeric_values.append(int(parts[2]))
                     except: pass
             if numeric_values:
                 next_id = str(max(numeric_values) + 1).zfill(3)
     except: pass
     return f"{fy_prefix}{next_id}"
+
 # ============================================================================
 # SECTION 1: CORPORATE PROFILES
 # ============================================================================
@@ -103,11 +106,19 @@ is_disabled = st.session_state.invoice_staged
 col_s1, col_s2 = st.columns(2)
 h_data = st.session_state.historical_data if st.session_state.loaded_from_history else {}
 
+# Safely wrap internal index arrays if loaded from history tracking table
+if isinstance(h_data, list) and len(h_data) > 0:
+    h_data = h_data[0]
+elif not isinstance(h_data, dict):
+    h_data = {}
+
 with col_s1:
     st.markdown("**🛡️ Source Company Details (Seller End)**")
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"] if not corporate_df.empty else pd.DataFrame()
     owner_records = owner_df.to_dict(orient="records") if not owner_df.empty else []
-    o_row = owner_records if len(owner_records) > 0 else {}
+    
+    # 🔒 FIX: Safely pull the absolute FIRST row dictionary element out of the data list array
+    o_row = owner_records[0] if len(owner_records) > 0 else {}
     
     src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"), disabled=is_disabled)
     src_address = st.text_area("Full Corporate Factory Address", clean_db_val(o_row, "billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"), disabled=is_disabled)
@@ -132,7 +143,9 @@ with col_s2:
         corp_options = [r["company_name"] for r in buyer_records]
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options, index=default_selectbox_index, disabled=is_disabled)
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
-        c_row = c_match if c_match else {}
+        
+        # 🔒 FIX: Safely pull the absolute FIRST row dictionary element out of the buyer match array
+        c_row = c_match[0] if c_match else {}
         
         bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"), disabled=is_disabled)
         bill_gstin = st.text_input("Buyer GSTIN Token", h_data.get("buyer_gstin", clean_db_val(c_row, "gstin", "08AAACA8504G2ZW")), disabled=is_disabled)
@@ -147,6 +160,65 @@ with col_s2:
         bill_person = st.text_input("Attn / Customer Contact Person", "Operations Head", disabled=is_disabled)
         bill_no = st.text_input("Buyer Contact Phone Number", "9999999999", disabled=is_disabled)
         base_pos = "08-RAJASTHAN"
+
+# ============================================================================
+# SECTION 2: TIMELINE FILTERS
+# ============================================================================
+st.markdown("---")
+st.subheader("🗓️ TimelineFilters")
+col_d1, col_d2, col_d3 = st.columns(3)
+
+with col_d1:
+    today = date.today()
+    default_start = today - timedelta(days=30)
+    selected_range = st.date_input("Select Dispatch Range Window", value=(default_start, today), key="invoice_date_range", disabled=is_disabled)
+    start_date, end_date = selected_range if (isinstance(selected_range, tuple) and len(selected_range) == 2) else (today - timedelta(days=30), today)
+
+with col_d2:
+    catalog_df["display_name"] = catalog_df["part_number"].astype(str) + " - " + catalog_df["description"].astype(str).str.upper()
+    dropdown_options = ["ALL COMPONENT DISPATCHED RUNS"] + list(catalog_df["display_name"].unique())
+    selected_display = st.selectbox("Filter Dispatch by Component Scope", dropdown_options, index=0, disabled=is_disabled)
+    is_filtered_run = selected_display != "ALL COMPONENT DISPATCHED RUNS"
+
+with col_d3:
+    selected_txn_type = st.selectbox("Transaction Flow Type", ["Outward", "Inward", "All Transactions"], index=0, disabled=is_disabled)
+
+st.markdown("<br>", unsafe_allow_html=True)
+col_l1, col_l2 = st.columns(2)
+
+with col_l1:
+    same_as_billing = st.checkbox("Shipping Destination matches Profile Billing Address Coordinates", value=True, disabled=is_disabled)
+    ship_addr_override = st.text_area("Override Consignee Delivery Address", value=bill_address if same_as_billing else "", disabled=is_disabled)
+    place_of_supply = st.text_input("Place of Supply State Code Target", value=base_pos, disabled=is_disabled)
+
+with col_l2:
+    default_print_date = datetime.strptime(h_data["invoice_date"], "%Y-%m-%d").date() if "invoice_date" in h_data else today
+    invoice_date_input = st.date_input("Invoice Structural Printing Date", default_print_date, disabled=is_disabled)
+    
+    credit_days_input = st.number_input("Credit Payment Terms (Days Window)", min_value=0, max_value=365, value=7, step=1, disabled=is_disabled)
+    due_date_calculated = invoice_date_input + timedelta(days=credit_days_input)
+    st.text_input("Calculated Payment Due Target Date", value=due_date_calculated.strftime("%d-%b-%Y"), disabled=True)
+    
+    if not st.session_state.invoice_staged:
+        auto_serial_default = calculate_next_db_serial(invoice_date_input)
+    else:
+        auto_serial_default = st.session_state.staged_serial
+        
+    typed_serial = st.text_input("Invoice Serial Sequential Number #", value=auto_serial_default, disabled=is_disabled)
+    
+    if typed_serial and not st.session_state.invoice_staged and supabase:
+        try:
+            db_match = supabase.table("cntr_invoice_history").select("*").eq("invoice_no", typed_serial.strip()).execute()
+            if db_match.data and not st.session_state.loaded_from_history:
+                st.session_state.loaded_from_history = True
+                st.session_state.historical_data = db_match.data
+                st.toast(f"ℹ️ Historical Match Found: Loaded parameters for {typed_serial} automatically!")
+                st.rerun()
+            elif not db_match.data and st.session_state.loaded_from_history:
+                st.session_state.loaded_from_history = False
+                st.session_state.historical_data = {}
+                st.rerun()
+        except: pass
 
 # ============================================================================
 # SECTION 2: TIMELINE FILTERS
