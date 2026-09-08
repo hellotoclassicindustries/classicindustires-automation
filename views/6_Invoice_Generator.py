@@ -10,8 +10,13 @@ from supabase import create_client
 from num2words import num2words
 
 # ============================================================================
-# INITIALIZATION & SECURE DATABASE GATEWAYS
+# INITIALIZATION & STATE MANAGEMENT CORE
 # ============================================================================
+if "invoice_staged" not in st.session_state:
+    st.session_state.invoice_staged = False
+if "staged_serial" not in st.session_state:
+    st.session_state.staged_serial = ""
+
 @st.cache_resource
 def init_supabase_connection():
     try:
@@ -50,32 +55,59 @@ if catalog_df.empty:
 st.title("🏭 Automated GST Commercial Tax Invoice Platform")
 st.markdown("---")
 
-# Helper utility to cleanly extract fields without dropping into string conversion crashes
 def clean_db_val(row_dict, key_name, fallback_text):
     val = row_dict.get(key_name)
     if val is None or str(val).strip() == "" or str(val).lower() == "none":
         return fallback_text
     return str(val).strip()
+
+def get_financial_year_prefix(current_date):
+    year = current_date.year
+    if current_date.month >= 4:
+        start_yr = str(year)[2:]
+        end_yr = str(year + 1)[2:]
+    else:
+        start_yr = str(year - 1)[2:]
+        end_yr = str(year)[2:]
+    return f"INV/{start_yr}-{end_yr}/"
+
+def calculate_next_db_serial(target_date):
+    fy_prefix = get_financial_year_prefix(target_date)
+    next_id = "001"
+    try:
+        hist_res = supabase.table("cntr_invoice_history").select("invoice_no").like("invoice_no", f"%{fy_prefix}%").execute()
+        if hist_res.data:
+            numeric_values = []
+            for item in hist_res.data:
+                parts = item["invoice_no"].split("/")
+                if len(parts) == 3:
+                    try:
+                        numeric_values.append(int(parts[2]))
+                    except: pass
+            if numeric_values:
+                next_id = str(max(numeric_values) + 1).zfill(3)
+    except: pass
+    return f"{fy_prefix}{next_id}"
 # ============================================================================
-# BLOCK 1: SOURCE COMPANY DETAILS (LEFT) & SHIPPING CLIENT DETAILS (RIGHT)
+# SECTION 1: CORPORATE PROFILES
 # ============================================================================
-st.subheader("🏛️ Corporate Profiles")
+st.subheader("🏛️ CorporateProfiles")
+is_disabled = st.session_state.invoice_staged
+
 col_s1, col_s2 = st.columns(2)
 
 with col_s1:
     st.markdown("**🛡️ Source Company Details (Seller End)**")
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"] if not corporate_df.empty else pd.DataFrame()
     owner_records = owner_df.to_dict(orient="records") if not owner_df.empty else []
-    
-    # 🔍 ARRAY EXTRACTION FIX: Extract the actual dictionary item index out of the records list
     o_row = owner_records[0] if len(owner_records) > 0 else {}
     
-    src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"))
-    src_address = st.text_area("Full Corporate Factory Address", clean_db_val(o_row, "billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"))
-    src_gstin = st.text_input("Seller GSTIN Code Token", clean_db_val(o_row, "gstin", "09ENRPS7521A1ZN"))
-    src_mobile = st.text_input("Seller Contact Mobile", clean_db_val(o_row, "contact_number", "9999999999"))
-    src_email = st.text_input("Seller Operations Email", clean_db_val(o_row, "email_address", "billing@classicindustries.in"))
-    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Left Panel Override)", value=clean_db_val(o_row, "hsn_number", "998349"))
+    src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"), disabled=is_disabled)
+    src_address = st.text_area("Full Corporate Factory Address", clean_db_val(o_row, "billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"), disabled=is_disabled)
+    src_gstin = st.text_input("Seller GSTIN Code Token", clean_db_val(o_row, "gstin", "09ENRPS7521A1ZN"), disabled=is_disabled)
+    src_mobile = st.text_input("Seller Contact Mobile", clean_db_val(o_row, "contact_number", "9999999999"), disabled=is_disabled)
+    src_email = st.text_input("Seller Operations Email", clean_db_val(o_row, "email_address", "billing@classicindustries.in"), disabled=is_disabled)
+    invoice_hsn_input = st.text_input("Active Billing HSN/SAC Codes (Left Panel Override)", value=clean_db_val(o_row, "hsn_number", "998349"), disabled=is_disabled)
 
 with col_s2:
     st.markdown("**🏢 Shipping Client Details (Buyer End)**")
@@ -84,30 +116,26 @@ with col_s2:
     
     if len(buyer_records) > 0:
         corp_options = [r["company_name"] for r in buyer_records]
-        selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options)
-        
+        selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options, disabled=is_disabled)
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
         c_row = c_match[0] if c_match else {}
         
-        bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"))
-        bill_gstin = st.text_input("Buyer GSTIN Token", clean_db_val(c_row, "gstin", "08AAACA8504G2ZW"))
-        bill_address = st.text_area("Buyer Corporate Billing Address", clean_db_val(c_row, "billing_address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019"))
-        bill_person = st.text_input("Attn / Customer Contact Person", clean_db_val(c_row, "contact_person", "Operations Head"))
-        bill_no = st.text_input("Buyer Contact Phone Number", clean_db_val(c_row, "contact_number", "9999999999"))
-        
-        st_code = str(c_row.get('state_code', '08')).zfill(2)
-        st_name = str(c_row.get('state_name', 'RAJASTHAN')).upper()
-        base_pos = f"{st_code}-{st_name}"
+        bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"), disabled=is_disabled)
+        bill_gstin = st.text_input("Buyer GSTIN Token", clean_db_val(c_row, "gstin", "08AAACA8504G2ZW"), disabled=is_disabled)
+        bill_address = st.text_area("Buyer Corporate Billing Address", clean_db_val(c_row, "billing_address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019"), disabled=is_disabled)
+        bill_person = st.text_input("Attn / Customer Contact Person", clean_db_val(c_row, "contact_person", "Operations Head"), disabled=is_disabled)
+        bill_no = st.text_input("Buyer Contact Phone Number", clean_db_val(c_row, "contact_number", "9999999999"), disabled=is_disabled)
+        base_pos = f"{str(c_row.get('state_code','08')).zfill(2)}-{str(c_row.get('state_name','RAJASTHAN')).upper()}"
     else:
-        bill_name = st.text_input("Buyer Registered Corporate Name", "REVENT METALCAST LIMITED")
-        bill_gstin = st.text_input("Buyer GSTIN Token", "08AAACA8504G2ZW")
-        bill_address = st.text_area("Buyer Corporate Billing Address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019")
-        bill_person = st.text_input("Attn / Customer Contact Person", "Operations Head")
-        bill_no = st.text_input("Buyer Contact Phone Number", "9999999999")
+        bill_name = st.text_input("Buyer Registered Corporate Name", "REVENT METALCAST LIMITED", disabled=is_disabled)
+        bill_gstin = st.text_input("Buyer GSTIN Token", "08AAACA8504G2ZW", disabled=is_disabled)
+        bill_address = st.text_area("Buyer Corporate Billing Address", "SPA-1195, RIICO Industrial Area, Phase IV, Bhiwadi, Alwar, Rajasthan, 301019", disabled=is_disabled)
+        bill_person = st.text_input("Attn / Customer Contact Person", "Operations Head", disabled=is_disabled)
+        bill_no = st.text_input("Buyer Contact Phone Number", "9999999999", disabled=is_disabled)
         base_pos = "08-RAJASTHAN"
 
 # ============================================================================
-# BLOCK 2: FLEXIBLE DATE RANGE & TRANSACTION METRIC FILTERS
+# SECTION 2: TIMELINE FILTERS
 # ============================================================================
 st.markdown("---")
 st.subheader("🗓️ TimelineFilters")
@@ -116,32 +144,41 @@ col_d1, col_d2, col_d3 = st.columns(3)
 with col_d1:
     today = date.today()
     default_start = today - timedelta(days=30)
-    selected_range = st.date_input("Select Dispatch Range Window", value=(default_start, today), key="invoice_date_range")
+    selected_range = st.date_input("Select Dispatch Range Window", value=(default_start, today), key="invoice_date_range", disabled=is_disabled)
     start_date, end_date = selected_range if (isinstance(selected_range, tuple) and len(selected_range) == 2) else (today - timedelta(days=30), today)
 
 with col_d2:
     catalog_df["display_name"] = catalog_df["part_number"].astype(str) + " - " + catalog_df["description"].astype(str).str.upper()
     dropdown_options = ["ALL COMPONENT DISPATCHED RUNS"] + list(catalog_df["display_name"].unique())
-    selected_display = st.selectbox("Filter Dispatch by Component Scope", dropdown_options, index=0)
+    selected_display = st.selectbox("Filter Dispatch by Component Scope", dropdown_options, index=0, disabled=is_disabled)
     is_filtered_run = selected_display != "ALL COMPONENT DISPATCHED RUNS"
 
 with col_d3:
-    selected_txn_type = st.selectbox("Transaction Flow Type", ["Outward", "Inward", "All Transactions"], index=0)
+    selected_txn_type = st.selectbox("Transaction Flow Type", ["Outward", "Inward", "All Transactions"], index=0, disabled=is_disabled)
 
 st.markdown("<br>", unsafe_allow_html=True)
 col_l1, col_l2 = st.columns(2)
 
 with col_l1:
-    same_as_billing = st.checkbox("Shipping Destination matches Profile Billing Address Coordinates", value=True)
-    ship_addr_override = st.text_area("Override Consignee Delivery Address", value=bill_address) if same_as_billing else st.text_area("Override Consignee Delivery Address", value="")
-    place_of_supply = st.text_input("Place of Supply State Code Target", value=base_pos)
+    same_as_billing = st.checkbox("Shipping Destination matches Profile Billing Address Coordinates", value=True, disabled=is_disabled)
+    ship_addr_override = st.text_area("Override Consignee Delivery Address", value=bill_address if same_as_billing else "", disabled=is_disabled)
+    place_of_supply = st.text_input("Place of Supply State Code Target", value=base_pos, disabled=is_disabled)
 
 with col_l2:
-    invoice_date_input = st.date_input("Invoice Structural Printing Date", today)
-    due_date_input = st.date_input("Payment Due Target Date", today + timedelta(days=30))
-    invoice_serial_no = st.text_input("Invoice Serial Sequential Number #", f"INV-{datetime.now().strftime('%M%S')}")
+    invoice_date_input = st.date_input("Invoice Structural Printing Date", today, disabled=is_disabled)
+    
+    # 🔒 AUTOMATION: Force the payment due window to exactly 7 days past issue date
+    due_date_calculated = invoice_date_input + timedelta(days=7)
+    st.text_input("Payment Due Target Date (7-Day Term)", value=due_date_calculated.strftime("%d-%b-%Y"), disabled=True)
+    
+    if not st.session_state.invoice_staged:
+        current_serial = calculate_next_db_serial(invoice_date_input)
+    else:
+        current_serial = st.session_state.staged_serial
+        
+    invoice_serial_no = st.text_input("Invoice Serial Sequential Number #", value=current_serial, disabled=True)
 # ============================================================================
-# BLOCK 3: LIVE INVOICE PREVIEW GRID (FILTERED FROM STAGING_LEDGER)
+# SECTION 3: PRINT PREVIEW
 # ============================================================================
 st.markdown("---")
 st.subheader("⚙️ PrintPreview")
@@ -153,86 +190,55 @@ parsed_hsn_override_list = [x.strip() for x in invoice_hsn_input.split(",") if x
 try:
     iso_start = start_date.strftime("%Y-%m-%d")
     iso_end = end_date.strftime("%Y-%m-%d")
-    
     query_builder = supabase.table("staging_ledger").select("id,date,entry_type,challan_no,part_number,description,qty_nos,hsn_code").gte("date", iso_start).lte("date", iso_end)
-    
     if selected_txn_type != "All Transactions":
         query_builder = query_builder.eq("entry_type", selected_txn_type)
-        
     ledger_response = query_builder.execute()
-    ledger_records = ledger_response.data
-    ledger_df = pd.DataFrame(ledger_records)
+    ledger_df = pd.DataFrame(ledger_response.data)
     
     if ledger_df.empty:
-        st.info(f"📋 Operations Notice: Zero production records matched selection ({selected_txn_type}) between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}.")
+        st.info("📋 Operations Notice: Zero production records matched selection parameters.")
         st.stop()
         
     grouped_ledger = ledger_df.groupby("part_number").agg({
         "qty_nos": "sum",
         "date": [lambda x: pd.to_datetime(x).min().strftime("%Y-%m-%d"), lambda x: pd.to_datetime(x).max().strftime("%Y-%m-%d")],
-        "hsn_code": "first",
-        "description": "first"
+        "hsn_code": "first", "description": "first"
     }).reset_index()
-    
     grouped_ledger.columns = ["part_number", "qty_nos", "txn_start_raw", "txn_end_date_raw", "hsn_code", "description"]
     merged_summary = grouped_ledger.sort_values(by="part_number")
-    
 except Exception as e:
-    iso_start = start_date.strftime("%Y-%m-%d")
-    iso_end = end_date.strftime("%Y-%m-%d")
+    iso_start, iso_end = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
     merged_summary = pd.DataFrame([
-        {"part_number": "458/20418P", "description": "DRIVE HEAD CASING", "hsn_code": "998349", "qty_nos": 121, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "84262252.9", "description": "CHN TRACTOR HOUSING TRUMPET LH", "hsn_code": "998349", "qty_nos": 80, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "84262253.9", "description": "CHN TRACTOR HOUSING TRUMPET RH", "hsn_code": "998349", "qty_nos": 84, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "92180026", "description": "HOUSING MCH DC", "hsn_code": "998349", "qty_nos": 45, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "998349", "qty_nos": 564, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 132, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end}
+        {"part_number": "458/20418P", "description": "DRIVE HEAD CASING", "hsn_code": "998349", "qty_nos": 106, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "589-M6715", "description": "REAR CASE CASTING-589-M6715", "hsn_code": "998349", "qty_nos": 110, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "589-M6716", "description": "REAR CASE CASTING-589-M6716", "hsn_code": "998349", "qty_nos": 104, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "91776325", "description": "CNH HOUSING CASTING MCH UG", "hsn_code": "998349", "qty_nos": 40, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "998349", "qty_nos": 289, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "W50217101Z1", "description": "CASE TRANSMISSION CASTING", "hsn_code": "998349", "qty_nos": 669, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end}
     ])
 
 for idx, row in merged_summary.iterrows():
     p_num = str(row["part_number"])
     if is_filtered_run and p_num.upper() not in selected_display.upper(): continue
-        
-    sim_qty = int(row["qty_nos"])
-    p_desc = str(row["description"]).upper()
-    
-    # 🔍 DYNAMIC LOOKUP: Fetch direct match parameters out of master view schema
+    sim_qty, p_desc = int(row["qty_nos"]), str(row["description"]).upper()
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
     
     if not match_part.empty:
         p_weight_kg = float(match_part["weight_kg"].values[0]) if pd.notna(match_part["weight_kg"].values[0]) else 28.0
-        
-        # Pull dynamic rate_per_ton metrics
-        if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values[0]):
-            p_rate = float(match_part["rate_per_ton"].values[0])
-        else:
-            p_rate = 2650.00
-            
-        # Pull dynamic database HSN settings
-        hsn_col_found = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
-        if hsn_col_found and pd.notna(match_part[hsn_col_found[0]].values[0]):
-            db_hsn = str(match_part[hsn_col_found[0]].values[0]).strip()
-        else:
-            db_hsn = "998349"
+        p_rate = float(match_part["rate_per_ton"].values[0]) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values[0]) else 2650.00
+        hsn_col = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
+        db_hsn = str(match_part[hsn_col].values[0]).strip() if hsn_col and pd.notna(match_part[hsn_col].values[0]) else "998349"
     else:
-        p_weight_kg = 28.0
-        p_rate = 2650.00
-        db_hsn = "998349"
+        p_weight_kg, p_rate, db_hsn = 28.0, 2650.00, "998349"
     
-    if parsed_hsn_override_list:
-        hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)]
-    else:
-        hsn_code = db_hsn
-        
-    s_date_raw = str(row["txn_start_raw"])
-    e_date_raw = str(row["txn_end_date_raw"])
-    
+    hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)] if parsed_hsn_override_list else db_hsn
+    s_date_raw, e_date_raw = str(row["txn_start_raw"]), str(row["txn_end_date_raw"])
     try:
-        s_date_clean = datetime.strptime(s_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
-        e_date_clean = datetime.strptime(e_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
-        txn_date_range_display = f"{s_date_clean} to {e_date_clean}" if s_date_clean != e_date_clean else s_date_clean
-    except:
-        txn_date_range_display = f"{s_date_raw} to {e_date_raw}" if s_date_raw != e_date_raw else s_date_raw
+        st_d = datetime.strptime(s_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
+        en_d = datetime.strptime(e_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
+        txn_date_range_display = f"{st_d} to {en_d}" if st_d != en_d else st_d
+    except: txn_date_range_display = s_date_raw
     
     total_wt_mt = (sim_qty * p_weight_kg) / 1000.0
     taxable_val = total_wt_mt * p_rate
@@ -240,57 +246,50 @@ for idx, row in merged_summary.iterrows():
     
     item_node = {
         "item_no": len(line_items_payload) + 1, "txn_date": txn_date_range_display, "part_number": p_num, "description": p_desc, "hsn": hsn_code,
-        "qty": sim_qty, "wt_pc": p_weight_kg, "total_wt_mt": total_wt_mt, "rate_mt": p_rate,
-        "taxable_value": taxable_val, "tax_amt": tax_amt, "gross_amount": taxable_val + tax_amt
+        "qty": sim_qty, "wt_pc": p_weight_kg, "total_wt_mt": total_wt_mt, "rate_mt": p_rate, "taxable_value": taxable_val, "tax_amt": tax_amt
     }
     line_items_payload.append(item_node)
-    
     if hsn_code not in hsn_summary_map: hsn_summary_map[hsn_code] = {"taxable_value": 0.0, "tax_amount": 0.0}
     hsn_summary_map[hsn_code]["taxable_value"] += taxable_val
     hsn_summary_map[hsn_code]["tax_amount"] += tax_amt
 
 summary_df = pd.DataFrame(line_items_payload)
-
 if not summary_df.empty:
     total_invoice_pieces = int(summary_df["qty"].sum())
     total_invoice_weight_mt = float(summary_df["total_wt_mt"].sum())
     total_taxable_subtotal = float(summary_df["taxable_value"].sum())
-    total_tax_sum = float(summary_df["tax_amt"].sum())
+    total_tax_sum = float(total_taxable_subtotal * 0.18)
     grand_invoice_total = total_taxable_subtotal + total_tax_sum
-    
     try:
-        rupees_integral = int(grand_invoice_total)
-        paise_fractional = int(round((grand_invoice_total - rupees_integral) * 100))
-        words_main = num2words(rupees_integral, lang='en_IN').title().replace("-", " ")
-        invoice_total_words = f"{words_main} Rupees And {num2words(paise_fractional, lang='en_IN').title().replace('-', ' ')} Paise Only." if paise_fractional > 0 else f"{words_main} Rupees Only."
+        words_main = num2words(int(grand_invoice_total), lang='en_IN').title().replace("-", " ")
+        invoice_total_words = f"{words_main} Rupees Only."
         tax_total_words = f"{num2words(int(total_tax_sum), lang='en_IN').title().replace('-', ' ')} Rupees Only."
-    except:
-        invoice_total_words, tax_total_words = "Amount Calculated Dynamically.", "Calculated Automatically."
+    except: invoice_total_words, tax_total_words = "Amount Calculated Dynamically.", "Calculated Automatically."
     
-    st.dataframe(
-        summary_df[["item_no", "txn_date", "part_number", "description", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], 
-        column_config={
-            "item_no": "Sr No", "txn_date": "📅 Date of Transaction (Range Summary)", "part_number": "Part Number", 
-            "description": "Part Description", "qty": "Total Quantity (Nos)", "wt_pc": "Weight/Pc (KG)", 
-            "total_wt_mt": "Total Tonnage (MT)", "rate_mt": "Rate/MT", "taxable_value": "Amount"
-        },
-        width="stretch", hide_index=True
-    )
+    st.dataframe(summary_df[["item_no", "part_number", "description", "hsn", "qty", "wt_pc", "total_wt_mt", "rate_mt", "taxable_value"]], width="stretch", hide_index=True)
 else:
     total_invoice_pieces, total_invoice_weight_mt, total_taxable_subtotal, total_tax_sum, grand_invoice_total = 0, 0.0, 0.0, 0.0, 0.0
     invoice_total_words, tax_total_words = "Zero Rupees Only.", "Zero Rupees Only."
-    st.info("📋 Operational Filter: No transaction records found matching active filter configurations.")
 
 invoice_payload = {
-    "invoice_no": str(invoice_serial_no), "start_date": invoice_date_input.strftime("%d-%b-%Y"), "end_date": due_date_input.strftime("%d-%b-%Y"),
-    "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_address": str(src_address),
-    "src_gstin": str(src_gstin), "src_mobile": str(src_mobile), "src_email": str(src_email), "bill_name": str(bill_name),
-    "bill_contact_person": str(bill_person), "bill_address": str(bill_address), "bill_gstin": str(bill_gstin),
-    "bill_mobile": str(bill_no), "ship_address": str(ship_addr_override), "line_items": line_items_payload,
-    "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
-    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map,
-    "total_invoice_weight_mt": total_invoice_weight_mt, "total_pieces": total_invoice_pieces
+    "invoice_no": str(invoice_serial_no), "start_date": invoice_date_input.strftime("%d-%b-%Y"), "end_date": due_date_calculated.strftime("%d-%b-%Y"),
+    "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_address": str(src_address), "src_gstin": str(src_gstin),
+    "bill_name": str(bill_name), "bill_address": str(bill_address), "bill_gstin": str(bill_gstin), "ship_address": str(ship_addr_override),
+    "line_items": line_items_payload, "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
+    "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map, "total_invoice_weight_mt": total_invoice_weight_mt, "total_pieces": total_invoice_pieces
 }
+
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    if st.button("🔒 Freeze & Stage Layout Configuration", width="stretch", disabled=st.session_state.invoice_staged):
+        st.session_state.invoice_staged = True
+        st.session_state.staged_serial = invoice_serial_no
+        st.rerun()
+with col_btn2:
+    if st.button("🔓 Modify Parameters / Unfreeze Form", width="stretch", disabled=not st.session_state.invoice_staged):
+        st.session_state.invoice_staged = False
+        st.session_state.staged_serial = ""
+        st.rerun()
 # ============================================================================
 # SECTION 4: PDF BLOCKS MATRIX GENERATOR
 # ============================================================================
@@ -370,17 +369,15 @@ def generate_invoice_pdf_file(data):
     doc.build(story)
     return pdf_filename
 # ============================================================================
-# SECTION 5: DOWNLOAD/PRINT CENTER RUNTIME BUTTON
+# SECTION 5: DOWNLOAD/PRINT CENTER
 # ============================================================================
 st.markdown("---")
 st.subheader("📥 Download/Print Center")
 
-if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", width="stretch"):
-    if not supabase:
-        st.error("❌ Cannot complete operation: Database connection is unavailable.")
-    elif summary_df.empty:
-        st.error("❌ Cannot compile an empty invoice layout. Check your ledger filters.")
-    else:
+if not st.session_state.invoice_staged:
+    st.info("💡 Review your configurations and click 'Freeze & Stage Layout Configuration' above to unlock the document generator console.")
+else:
+    if st.button("🚀 Finalize, Commit & Generate Official Commercial Invoice PDF", width="stretch"):
         f_path = generate_invoice_pdf_file(invoice_payload)
         try:
             dup_check = supabase.table("cntr_invoice_history").select("invoice_no").eq("invoice_no", invoice_payload["invoice_no"]).execute()
@@ -389,7 +386,7 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", width="stret
             is_duplicate = False
             
         if is_duplicate:
-            st.error(f"⚠️ Validation Failure: Invoice serial number **{invoice_payload['invoice_no']}** already exists in the tracking log.")
+            st.error(f"⚠️ Validation Failure: Invoice serial number **{invoice_payload['invoice_no']}** was logged by another station concurrently. Please unfreeze parameters to fetch the next sequence number.")
         else:
             try:
                 history_row = {
@@ -399,9 +396,9 @@ if st.button("🚀 Compile Print-Ready GST Commercial Invoice PDF", width="stret
                     "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
                 }
                 supabase.table("cntr_invoice_history").insert(history_row).execute()
-                st.success("🎉 Multi-item tax invoice compiled and saved to cloud registry successfully!")
+                st.success("🎉 Commercial invoice logged to history ledger and compiled successfully!")
+                
+                with open(f_path, "rb") as f:
+                    st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", mime="application/pdf", width="stretch")
             except Exception as save_err:
-                st.warning("📋 Cloud Audit Notice: PDF compiled successfully but history row log bypass active.")
-            
-            with open(f_path, "rb") as f:
-                st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", mime="application/pdf", width="stretch")
+                st.error(f"❌ Cloud Audit Exception: Failure during secure storage sync. Details: {str(save_err)}")
