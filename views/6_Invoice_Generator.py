@@ -20,6 +20,8 @@ if "loaded_from_history" not in st.session_state:
     st.session_state.loaded_from_history = False
 if "historical_data" not in st.session_state:
     st.session_state.historical_data = {}
+if "pdf_ready_path" not in st.session_state:
+    st.session_state.pdf_ready_path = None
 
 @st.cache_resource
 def init_supabase_connection():
@@ -86,7 +88,7 @@ def calculate_next_db_serial(target_date):
                 parts = item["invoice_no"].split("/")
                 if len(parts) == 3:
                     try:
-                        numeric_values.append(int(parts[2]))
+                        numeric_values.append(int(parts))
                     except: pass
             if numeric_values:
                 next_id = str(max(numeric_values) + 1).zfill(3)
@@ -99,15 +101,13 @@ st.subheader("🏛️ CorporateProfiles")
 is_disabled = st.session_state.invoice_staged
 
 col_s1, col_s2 = st.columns(2)
-
-# Pull baseline configurations or assign default database backload hooks
 h_data = st.session_state.historical_data if st.session_state.loaded_from_history else {}
 
 with col_s1:
     st.markdown("**🛡️ Source Company Details (Seller End)**")
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"] if not corporate_df.empty else pd.DataFrame()
     owner_records = owner_df.to_dict(orient="records") if not owner_df.empty else []
-    o_row = owner_records[0] if len(owner_records) > 0 else {}
+    o_row = owner_records if len(owner_records) > 0 else {}
     
     src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"), disabled=is_disabled)
     src_address = st.text_area("Full Corporate Factory Address", clean_db_val(o_row, "billing_address", "KH-267, H.No.-08, Chipiyana Bujurg, Ghaziabad – 201009, Uttar Pradesh"), disabled=is_disabled)
@@ -121,7 +121,6 @@ with col_s2:
     buyer_only_df = corporate_df[corporate_df["profile_type"].str.lower() != "owner"] if not corporate_df.empty else pd.DataFrame()
     buyer_records = buyer_only_df.to_dict(orient="records") if not buyer_only_df.empty else []
     
-    # Check if a specific customer was loaded from a historical back-entry
     target_buyer_name = h_data.get("buyer_name", "")
     default_selectbox_index = 0
     if target_buyer_name and len(buyer_records) > 0:
@@ -133,7 +132,7 @@ with col_s2:
         corp_options = [r["company_name"] for r in buyer_records]
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options, index=default_selectbox_index, disabled=is_disabled)
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
-        c_row = c_match[0] if c_match else {}
+        c_row = c_match if c_match else {}
         
         bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"), disabled=is_disabled)
         bill_gstin = st.text_input("Buyer GSTIN Token", h_data.get("buyer_gstin", clean_db_val(c_row, "gstin", "08AAACA8504G2ZW")), disabled=is_disabled)
@@ -180,31 +179,26 @@ with col_l1:
     place_of_supply = st.text_input("Place of Supply State Code Target", value=base_pos, disabled=is_disabled)
 
 with col_l2:
-    # Handle historical printing date backloads cleanly if triggered
     default_print_date = datetime.strptime(h_data["invoice_date"], "%Y-%m-%d").date() if "invoice_date" in h_data else today
     invoice_date_input = st.date_input("Invoice Structural Printing Date", default_print_date, disabled=is_disabled)
     
-    # ⚙️ ENHANCEMENT 1: Editable dynamic credit window calculation panel
     credit_days_input = st.number_input("Credit Payment Terms (Days Window)", min_value=0, max_value=365, value=7, step=1, disabled=is_disabled)
     due_date_calculated = invoice_date_input + timedelta(days=credit_days_input)
     st.text_input("Calculated Payment Due Target Date", value=due_date_calculated.strftime("%d-%b-%Y"), disabled=True)
     
-    # Calculate next serial defaults based on calendar limits
     if not st.session_state.invoice_staged:
         auto_serial_default = calculate_next_db_serial(invoice_date_input)
     else:
         auto_serial_default = st.session_state.staged_serial
         
-    # ⚙️ ENHANCEMENT 2: Fully editable serial control string entry box with instant lookup hook loop
     typed_serial = st.text_input("Invoice Serial Sequential Number #", value=auto_serial_default, disabled=is_disabled)
     
-    # Instant trigger lookup event logic
     if typed_serial and not st.session_state.invoice_staged and supabase:
         try:
             db_match = supabase.table("cntr_invoice_history").select("*").eq("invoice_no", typed_serial.strip()).execute()
             if db_match.data and not st.session_state.loaded_from_history:
                 st.session_state.loaded_from_history = True
-                st.session_state.historical_data = db_match.data[0]
+                st.session_state.historical_data = db_match.data
                 st.toast(f"ℹ️ Historical Match Found: Loaded parameters for {typed_serial} automatically!")
                 st.rerun()
             elif not db_match.data and st.session_state.loaded_from_history:
@@ -260,18 +254,18 @@ for idx, row in merged_summary.iterrows():
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
     
     if not match_part.empty:
-        p_weight_kg = float(match_part["weight_kg"].values[0]) if pd.notna(match_part["weight_kg"].values[0]) else 28.0
-        p_rate = float(match_part["rate_per_ton"].values[0]) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values[0]) else 2650.00
+        p_weight_kg = float(match_part["weight_kg"].values) if pd.notna(match_part["weight_kg"].values) else 28.0
+        p_rate = float(match_part["rate_per_ton"].values) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values) else 2650.00
         hsn_col = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
-        db_hsn = str(match_part[hsn_col].values[0]).strip() if hsn_col and pd.notna(match_part[hsn_col].values[0]) else "998349"
+        db_hsn = str(match_part[hsn_col].values).strip() if hsn_col and pd.notna(match_part[hsn_col].values) else "998349"
     else:
         p_weight_kg, p_rate, db_hsn = 28.0, 2650.00, "998349"
     
     hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)] if parsed_hsn_override_list else db_hsn
     s_date_raw, e_date_raw = str(row["txn_start_raw"]), str(row["txn_end_date_raw"])
     try:
-        st_d = datetime.strptime(s_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
-        en_d = datetime.strptime(e_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
+        st_d = datetime.strptime(s_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
+        en_d = datetime.strptime(e_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
         txn_date_range_display = f"{st_d} to {en_d}" if st_d != en_d else st_d
     except: txn_date_range_display = s_date_raw
     
@@ -326,6 +320,7 @@ with col_btn2:
         st.session_state.staged_serial = ""
         st.session_state.loaded_from_history = False
         st.session_state.historical_data = {}
+        st.session_state.pdf_ready_path = None
         st.rerun()
 # ============================================================================
 # SECTION 4: PDF BLOCKS MATRIX GENERATOR
@@ -360,7 +355,7 @@ def generate_invoice_pdf_file(data):
         ["", Paragraph("Terms of Delivery", meta_lbl), ""]
     ]
     
-    # 🔒 FIXED ARRAY: 270 + 135 + 135 = 540 Maximum Horizontal Layout Points
+    # 🔒 Width assignments map to 270 + 135 + 135 = 540 max горизонтальный horizontal printable space
     top_table = Table(header_data, colWidths=[270, 135, 135])
     top_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')),
@@ -369,7 +364,7 @@ def generate_invoice_pdf_file(data):
     story.append(top_table)
     story.append(Spacer(1, 8))
     
-    # 🔒 FIXED ARRAY: 25 + 175 + 55 + 45 + 50 + 55 + 45 + 90 = 540 Horizontal Matrix Points
+    # 🔒 Spacing columns map precisely to 25 + 175 + 55 + 45 + 50 + 55 + 45 + 90 = 540 points layout matrix
     col_widths = [25, 175, 55, 45, 50, 55, 45, 90]
     
     table_content = [[Paragraph("SI<br/>No", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per<br/>Pieces", hdr_style), Paragraph("Total Weight<br/>In Ton", hdr_style), Paragraph("Per<br/>Ton<br/>Rate", hdr_style), Paragraph("Amount", hdr_style)]]
@@ -390,27 +385,41 @@ def generate_invoice_pdf_file(data):
         summary_data.append([Paragraph(hsn_code, cell_center), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_right), Paragraph("18%", cell_center), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_right), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_right)])
     summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold)])
     
-    # 🔒 FIXED ARRAY: 100 + 110 + 80 + 125 + 125 = 540 Horizontal Summary Grid Points
+    # 🔒 Length constraints map precisely to 100 + 110 + 80 + 125 + 125 = 540 points alignment
     summary_table = Table(summary_data, colWidths=[100, 110, 80, 125, 125])
     summary_table.setStyle(TableStyle([
         ('SPAN', (0,0), (3,0)), ('SPAN', (0,1), (4,1)), ('GRID', (0,2), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 6))
-    # ============================================================================
+    
+    story.append(Paragraph(f"Tax Amount (in words) : <b>{data['tax_total_words']}</b>", meta_body))
+    story.append(Spacer(1, 6))
+    
+    bank_p = Paragraph(f"<b>Company's Bank Details</b><br/>Bank Name: <b>Indian Bank</b><br/>A/c No: <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_body)
+    decl_p = Paragraph("<b>Declaration</b><br/>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", meta_body)
+    sign_p = Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RSign', parent=meta_body, alignment=2))
+    
+    # 🔒 Dimensions balance points equal 300 + 240 = 540 horizontal width footprint split
+    footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=[300, 240])
+    footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 5)]))
+    story.append(footer_table)
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("This is a Computer Generated Invoice", ParagraphStyle('WaiverText', fontName='Helvetica-Oblique', fontSize=7.5, alignment=1)))
+    
+    doc.build(story)
+    return pdf_filename
+# ============================================================================
 # SECTION 5: DOWNLOAD/PRINT CENTER
 # ============================================================================
 st.markdown("---")
 st.subheader("📥 Download/Print Center")
 
-if "pdf_ready_path" not in st.session_state:
-    st.session_state.pdf_ready_path = None
-
 if not st.session_state.invoice_staged:
     st.info("💡 Review your configurations and click 'Freeze & Stage Layout Configuration' above to unlock the document generator console.")
     st.session_state.pdf_ready_path = None
 else:
-    if st.button("🚀 Finalize, Commit & Generate Official Commercial Invoice PDF", key="finalize_btn"):
+    if st.button("🚀 Finalize, Commit & Generate Official Commercial Invoice PDF", key="finalize_btn", width="stretch"):
         f_path = generate_invoice_pdf_file(invoice_payload)
         is_update_override = st.session_state.loaded_from_history
         
@@ -440,7 +449,6 @@ else:
             st.error(f"❌ Cloud Audit Exception: Failure during secure storage sync. Details: {str(save_err)}")
             st.session_state.pdf_ready_path = None
 
-    # Persistent download button element that survives Streamlit's page re-runs
     if st.session_state.pdf_ready_path and os.path.exists(st.session_state.pdf_ready_path):
         st.markdown("<br>", unsafe_allow_html=True)
         with open(st.session_state.pdf_ready_path, "rb") as f:
@@ -448,22 +456,6 @@ else:
                 label="📥 Download Official Job-Work GST Invoice PDF", 
                 data=f, 
                 file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", 
-                mime="application/pdf"
+                mime="application/pdf",
+                width="stretch"
             )
-
-    story.append(Paragraph(f"Tax Amount (in words) : <b>{data['tax_total_words']}</b>", meta_body))
-    story.append(Spacer(1, 6))
-    
-    bank_p = Paragraph(f"<b>Company's Bank Details</b><br/>Bank Name: <b>Indian Bank</b><br/>A/c No: <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_body)
-    decl_p = Paragraph("<b>Declaration</b><br/>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", meta_body)
-    sign_p = Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RSign', parent=meta_body, alignment=2))
-    
-    # 🔒 FIXED ARRAY: 300 + 240 = 540 Horizontal Legal Grid Points Layout
-    footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=[300, 240])
-    footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 5)]))
-    story.append(footer_table)
-    story.append(Spacer(1, 6))
-    story.append(Paragraph("This is a Computer Generated Invoice", ParagraphStyle('WaiverText', fontName='Helvetica-Oblique', fontSize=7.5, alignment=1)))
-    
-    doc.build(story)
-    return pdf_filename
