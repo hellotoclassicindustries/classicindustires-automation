@@ -411,37 +411,62 @@ def generate_invoice_pdf_file(data):
 st.markdown("---")
 st.subheader("📥 Download/Print Center")
 
+# Track the generated file path persistently in the background state
+if "pdf_ready_path" not in st.session_state:
+    st.session_state.pdf_ready_path = None
+
 if not st.session_state.invoice_staged:
     st.info("💡 Review your configurations and click 'Freeze & Stage Layout Configuration' above to unlock the document generator console.")
+    st.session_state.pdf_ready_path = None # Reset state if form is unfrozen
 else:
+    # 1. Processing Button Console
     if st.button("🚀 Finalize, Commit & Generate Official Commercial Invoice PDF", width="stretch"):
         f_path = generate_invoice_pdf_file(invoice_payload)
-        
-        # Check if this execution is overriding an existing old record entry or writing a fresh sequence row
         is_update_override = st.session_state.loaded_from_history
         
         try:
             if is_update_override:
-                # Historical backload update logic parameters path
                 supabase.table("cntr_invoice_history").update({
                     "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
-                    "buyer_name": invoice_payload["bill_name"], "buyer_gstin": invoice_payload["bill_gstin"],
-                    "total_pieces": invoice_payload["total_pieces"], "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
-                    "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
+                    "buyer_name": invoice_payload["bill_name"], 
+                    "buyer_gstin": invoice_payload["bill_gstin"],
+                    "total_pieces": invoice_payload["total_pieces"], 
+                    "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
+                    "taxable_amount": invoice_payload["taxable_amount"], 
+                    "igst_amount": invoice_payload["igst"], 
+                    "grand_total": invoice_payload["grand_total"]
                 }).eq("invoice_no", invoice_payload["invoice_no"]).execute()
                 st.success(f"🎉 Historical record **{invoice_payload['invoice_no']}** updated in history table successfully!")
             else:
-                # Standard insertion workflow validation path
                 history_row = {
-                    "invoice_no": invoice_payload["invoice_no"], "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
-                    "buyer_name": invoice_payload["bill_name"], "buyer_gstin": invoice_payload["bill_gstin"],
-                    "total_pieces": invoice_payload["total_pieces"], "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
-                    "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
+                    "invoice_no": invoice_payload["invoice_no"], 
+                    "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
+                    "buyer_name": invoice_payload["bill_name"], 
+                    "buyer_gstin": invoice_payload["bill_gstin"],
+                    "total_pieces": invoice_payload["total_pieces"], 
+                    "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
+                    "taxable_amount": invoice_payload["taxable_amount"], 
+                    "igst_amount": invoice_payload["igst"], 
+                    "grand_total": invoice_payload["grand_total"]
                 }
                 supabase.table("cntr_invoice_history").insert(history_row).execute()
                 st.success("🎉 New commercial invoice logged to history ledger cleanly!")
-
-            with open(f_path, "rb") as f:
-                st.download_button(label="📥 Download Official Job-Work GST Invoice PDF", data=f, file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", mime="application/pdf", width="stretch")
+            
+            # Lock the compiled file path into session state to keep the download active
+            st.session_state.pdf_ready_path = f_path
+            
         except Exception as save_err:
             st.error(f"❌ Cloud Audit Exception: Failure during secure storage sync. Details: {str(save_err)}")
+            st.session_state.pdf_ready_path = None
+
+    # 2. Persistent Download Button (Stays on screen after being clicked)
+    if st.session_state.pdf_ready_path and os.path.exists(st.session_state.pdf_ready_path):
+        st.markdown("<br>", unsafe_allow_html=True)
+        with open(st.session_state.pdf_ready_path, "rb") as f:
+            st.download_button(
+                label="📥 Download Official Job-Work GST Invoice PDF", 
+                data=f, 
+                file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", 
+                mime="application/pdf", 
+                width="stretch"
+            )
