@@ -10,7 +10,7 @@ from supabase import create_client
 from num2words import num2words
 
 # ============================================================================
-# INITIALIZATION & STATE MANAGEMENT CORE
+# PART 1: INITIALIZATION & STATE MANAGEMENT CORE
 # ============================================================================
 if "invoice_staged" not in st.session_state:
     st.session_state.invoice_staged = False
@@ -97,7 +97,7 @@ def calculate_next_db_serial(target_date):
     except: pass
     return f"{fy_prefix}{next_id}"
 # ============================================================================
-# SECTION 1: CORPORATE PROFILES
+# PART 2: CORPORATE PROFILES
 # ============================================================================
 st.subheader("🏛️ Corporate Profiles")
 is_disabled = st.session_state.invoice_staged
@@ -155,7 +155,7 @@ with col_s2:
         bill_no = st.text_input("Buyer Contact Phone Number", "9999999999", disabled=is_disabled)
         base_pos = "08-RAJASTHAN"
 # ============================================================================
-# SECTION 2: TIMELINE FILTERS
+# PART 3: TIMELINE FILTERS
 # ============================================================================
 st.markdown("---")
 st.subheader("🗓️ Timeline Filters")
@@ -213,7 +213,7 @@ with col_l2:
                 st.rerun()
         except: pass
 # ============================================================================
-# SECTION 3: PRINT PREVIEW & INVOICE PAYLOAD COMPILATION
+# PART 4: PRINT PREVIEW & DATA ACCUMULATION ENGINE
 # ============================================================================
 st.markdown("---")
 st.subheader("⚙️ Print Preview")
@@ -259,15 +259,26 @@ for idx, row in merged_summary.iterrows():
     sim_qty, p_desc = int(row["qty_nos"]), str(row["description"]).upper()
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
     
-    if not match_part.empty:
-        # FIX: Slices the dataframe matching index coordinate matrices to avoid dimension scalar errors
-        p_weight_kg = float(match_part["weight_kg"].iloc[0]) if pd.notna(match_part["weight_kg"].iloc[0]) else 28.0
-        p_rate = float(match_part["rate_per_ton"].iloc[0]) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].iloc[0]) else 2650.00
-        hsn_col = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
-        db_hsn = str(match_part[hsn_col].iloc[0]).strip() if hsn_col and pd.notna(match_part[hsn_col].iloc[0]) else "998349"
-    else:
-        p_weight_kg, p_rate, db_hsn = 28.0, 2650.00, "998349"
+    p_weight_kg = 28.0
+    p_rate = 2650.00
+    db_hsn = "998349"
     
+    if not match_part.empty:
+        if "weight_kg" in match_part.columns:
+            val_wt = match_part["weight_kg"].iat[0]
+            if pd.notna(val_wt): p_weight_kg = float(val_wt)
+                
+        if "rate_per_ton" in match_part.columns:
+            val_rt = match_part["rate_per_ton"].iat[0]
+            if pd.notna(val_rt): p_rate = float(val_rt)
+        
+        hsn_val = None
+        if "hsn_code" in match_part.columns: hsn_val = match_part["hsn_code"].iat[0]
+        elif "hsn_sac" in match_part.columns: hsn_val = match_part["hsn_sac"].iat[0]
+            
+        if pd.notna(hsn_val) and str(hsn_val).strip() != "" and str(hsn_val).lower() != "none":
+            db_hsn = str(hsn_val).strip()
+
     hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)] if parsed_hsn_override_list else db_hsn
     s_date_raw, e_date_raw = str(row["txn_start_raw"]), str(row["txn_end_date_raw"])
     try:
@@ -334,64 +345,109 @@ with col_btn2:
         st.session_state.pdf_ready_path = None
         st.rerun()
 # ============================================================================
-# PART 4: BULLETPROOF LINE ITEM AGGREGATION LOOP (AMBIGUITY ELIMINATED)
+# PART 5: PDF BLOCKS MATRIX GENERATOR
 # ============================================================================
-for idx, row in merged_summary.iterrows():
-    p_num = str(row["part_number"])
-    if is_filtered_run and p_num.upper() not in selected_display.upper(): continue
-    sim_qty, p_desc = int(row["qty_nos"]), str(row["description"]).upper()
-    match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
+def generate_invoice_pdf_file(data):
+    pdf_filename = f"generated/Invoice_{data['invoice_no'].replace('/', '_')}.pdf"
+    os.makedirs("generated", exist_ok=True)
+    doc = SimpleDocTemplate(pdf_filename, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
     
-    # Initialize robust defaults
-    p_weight_kg = 28.0
-    p_rate = 2650.00
-    db_hsn = "998349"
+    title_style = ParagraphStyle('DocTitle', fontName='Helvetica-Bold', fontSize=12, leading=14, alignment=1)
+    meta_lbl = ParagraphStyle('MetaLbl', fontName='Helvetica', fontSize=7, leading=9, textColor=colors.HexColor('#444444'))
+    meta_bold = ParagraphStyle('MetaBold', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.black)
+    meta_body = ParagraphStyle('MetaBody', fontName='Helvetica', fontSize=8, leading=11, textColor=colors.black)
+    hdr_style = ParagraphStyle('HdrCell', fontName='Helvetica-Bold', fontSize=7.5, leading=9, alignment=1)
+    cell_center = ParagraphStyle('CellC', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
+    cell_left = ParagraphStyle('CellL', fontName='Helvetica', fontSize=8, leading=10, alignment=0)
+    cell_right = ParagraphStyle('CellR', fontName='Helvetica', fontSize=8, leading=10, alignment=2)
+    cell_right_bold = ParagraphStyle('CellRB', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=2)
     
-    if not match_part.empty:
-        # Extract weight cleanly using positional item lookup
-        if "weight_kg" in match_part.columns:
-            val_wt = match_part["weight_kg"].iat[0]
-            if pd.notna(val_wt):
-                p_weight_kg = float(val_wt)
-                
-        # Extract rate cleanly using positional item lookup        
-        if "rate_per_ton" in match_part.columns:
-            val_rt = match_part["rate_per_ton"].iat[0]
-            if pd.notna(val_rt):
-                p_rate = float(val_rt)
-        
-        # EXTRACT HSN CLEANLY: Try potential column structures sequentially to avoid multi-column slices
-        hsn_val = None
-        if "hsn_code" in match_part.columns:
-            hsn_val = match_part["hsn_code"].iat[0]
-        elif "hsn_sac" in match_part.columns:
-            hsn_val = match_part["hsn_sac"].iat[0]
-            
-        if pd.notna(hsn_val) and str(hsn_val).strip() != "" and str(hsn_val).lower() != "none":
-            db_hsn = str(hsn_val).strip()
-
-    hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)] if parsed_hsn_override_list else db_hsn
-    s_date_raw, e_date_raw = str(row["txn_start_raw"]), str(row["txn_end_date_raw"])
-    try:
-        st_d = datetime.strptime(s_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
-        en_d = datetime.strptime(e_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
-        txn_date_range_display = f"{st_d} to {en_d}" if st_d != en_d else st_d
-    except: txn_date_range_display = s_date_raw
+    story.append(Paragraph("Tax Invoice", title_style))
+    story.append(Spacer(1, 6))
     
-    total_wt_mt = (sim_qty * p_weight_kg) / 1000.0
-    taxable_val = total_wt_mt * p_rate
-    tax_amt = taxable_val * 0.18
+    src_addr_formatted = f"{data['src_address'].replace('\n','<br/>')}<br/><b>State Name:</b> UTTAR PRADESH, <b>Code:</b> 09"
+    bill_addr_formatted = f"{data['ship_address'].replace('\n','<br/>')}<br/><b>State Name:</b> RAJASTHAN, <b>Code:</b> 08"
     
-    item_node = {
-        "item_no": len(line_items_payload) + 1, "txn_date": txn_date_range_display, "part_number": p_num, "description": p_desc, "hsn": hsn_code,
-        "qty": sim_qty, "wt_pc": p_weight_kg, "total_wt_mt": total_wt_mt, "rate_mt": p_rate, "taxable_value": taxable_val, "tax_amt": tax_amt
-    }
-    line_items_payload.append(item_node)
-    if hsn_code not in hsn_summary_map: hsn_summary_map[hsn_code] = {"taxable_value": 0.0, "tax_amount": 0.0}
-    hsn_summary_map[hsn_code]["taxable_value"] += taxable_val
-    hsn_summary_map[hsn_code]["tax_amount"] += tax_amt
+    src_p = Paragraph(f"<b>{data['src_name']}</b><br/>{src_addr_formatted}<br/><b>GSTIN/UIN:</b> {data['src_gstin']}", meta_body)
+    header_data = [
+        [src_p, Paragraph(f"Invoice No.<br/><b>{data['invoice_no']}</b>", meta_body), Paragraph(f"Dated<br/><b>{data['start_date']}</b>", meta_body)],
+        ["", Paragraph("Delivery Note", meta_lbl), Paragraph("Mode/Terms of Payment", meta_lbl)],
+        [Paragraph(f"<b>Consignee (Ship to)</b><br/><b>{data['bill_name']}</b><br/>{bill_addr_formatted}<br/><b>GSTIN/UIN:</b> {data['bill_gstin']}", meta_body), Paragraph("Reference No.", meta_lbl), Paragraph("Other References", meta_lbl)],
+        ["", Paragraph("Buyer's Order No.", meta_lbl), Paragraph("Dated", meta_lbl)],
+        ["", Paragraph("Dispatch Doc No.", meta_lbl), Paragraph("Delivery Note Date", meta_lbl)],
+        [Paragraph(f"<b>Buyer (Bill to)</b><br/><b>{data['bill_name']}</b><br/>{bill_addr_formatted}<br/><b>GSTIN/UIN:</b> {data['bill_gstin']}", meta_body), Paragraph("Dispatched through", meta_lbl), Paragraph("Destination", meta_lbl)],
+        ["", Paragraph("Terms of Delivery", meta_lbl), ""]
+    ]
+    
+    top_table = Table(header_data, colWidths=[270, 135, 135])
+    top_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')),
+        ('SPAN', (0,0), (0,1)), ('SPAN', (0,2), (0,4)), ('SPAN', (0,5), (0,6)), ('SPAN', (1,6), (2,6)), ('PADDING', (0,0), (-1,-1), 4)
+    ]))
+    story.append(top_table)
+    story.append(Spacer(1, 8))
+    
+    col_widths = [25, 175, 55, 45, 50, 55, 45, 90]
+    table_content = [[Paragraph("SI<br/>No", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per<br/>Pieces", hdr_style), Paragraph("Total Weight<br/>In Ton", hdr_style), Paragraph("Per<br/>Ton<br/>Rate", hdr_style), Paragraph("Amount", hdr_style)]]
+    
+    for idx, item in enumerate(data["line_items"]):
+        goods_description = f"<b>{item['part_number']}</b><br/> | — {item['description']}"
+        table_content.append([
+            Paragraph(str(idx+1), cell_center), Paragraph(goods_description, cell_left), Paragraph(item["hsn"], cell_center),
+            Paragraph(f"{item['qty']:,}", cell_center), Paragraph(f"{item['wt_pc']:.1f}KG", cell_center),
+            Paragraph(f"{item['total_wt_mt']:.4f}", cell_center), Paragraph(f"{int(item['rate_mt'])}", cell_center),
+            Paragraph(f"{item['taxable_value']:,.2f}", cell_right)
+        ])
+    table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{data['total_pieces']}</b>", cell_center), "", Paragraph(f"<b>{data['total_invoice_weight_mt']:.4f}</b>", cell_center), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold)])
+    
+    item_table = Table(table_content, colWidths=col_widths, repeatRows=1)
+    item_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)]))
+    story.append(item_table)
+    
+    summary_data = [
+        [Paragraph("Amount Chargeable (in words)", meta_lbl), Paragraph("E. & O.E", ParagraphStyle('Roe', fontName='Helvetica', fontSize=7, alignment=2)), "", "", ""],
+        [Paragraph(f"<b>{data['total_words']}</b>", meta_bold), "", "", "", ""],
+        [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
+    ]
+    for hsn_code, vals in data["hsn_map"].items():
+        tax_rate_label = f"IGST 18% (Rs. {vals['tax_amount']:,.2f})"
+        summary_data.append([
+            Paragraph(hsn_code, cell_center), Paragraph(f"{vals['taxable_value']:,.2f}", cell_right),
+            Paragraph(tax_rate_label, cell_center), Paragraph(f"{vals['tax_amount']:,.2f}", cell_right),
+            Paragraph(f"{vals['tax_amount']:,.2f}", cell_right)
+        ])
+    summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold)])
+    
+    summary_table = Table(summary_data, colWidths=[100, 110, 80, 125, 125])
+    summary_table.setStyle(TableStyle([
+        ('SPAN', (0,0), (3,0)), ('SPAN', (0,1), (4,1)), ('GRID', (0,2), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 6))
+    
+    story.append(Paragraph(f"Tax Amount (in words) : <b>{data['tax_total_words']}</b>", meta_body))
+    story.append(Spacer(1, 6))
+    
+    bank_p = Paragraph(f"<b>Company's Bank Details</b><br/>Bank Name: <b>Indian Bank</b><br/>A/c No: <b>8383467708</b><br/>IFS Code: <b>IDIB000P618</b>", meta_body)
+    decl_p = Paragraph("<b>Declaration</b><br/>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", meta_body)
+    sign_p = Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RSign', parent=meta_body, alignment=2))
+    
+    footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=[300, 240])
+    footer_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'), 
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), 
+        ('SPAN', (0,1), (1,1)), 
+        ('PADDING', (0,0), (-1,-1), 5)
+    ]))
+    story.append(footer_table)
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("This is a Computer Generated Invoice", ParagraphStyle('WaiverText', fontName='Helvetica-Oblique', fontSize=7.5, alignment=1)))
+    
+    doc.build(story)
+    return pdf_filename
 # ============================================================================
-# SECTION 5: DOWNLOAD/PRINT CENTER
+# PART 6: DOWNLOAD/PRINT CENTER
 # ============================================================================
 st.markdown("---")
 st.subheader("📥 Download/Print Center")
