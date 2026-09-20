@@ -445,52 +445,20 @@ def generate_invoice_pdf_file(data):
     doc.build(story)
     return pdf_filename
 # ============================================================================
-# SECTION 5: DOWNLOAD/PRINT CENTER
+# SECTION 5: CLEAN DEPRECATION-FREE STREAMLIT ACTION MODULES
 # ============================================================================
-st.markdown("---")
-st.subheader("📥 Download/Print Center")
-
-if not st.session_state.invoice_staged:
-    st.info("💡 Review your configurations and click 'Freeze & Stage Layout Configuration' above to unlock the document generator console.")
-    st.session_state.pdf_ready_path = None
-else:
-    if st.button("🚀 Finalize, Commit & Generate Official Commercial Invoice PDF", key="finalize_btn", width="stretch"):
-        f_path = generate_invoice_pdf_file(invoice_payload)
-        is_update_override = st.session_state.loaded_from_history
-        
-        try:
-            if is_update_override:
-                supabase.table("cntr_invoice_history").update({
-                    "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
-                    "buyer_name": invoice_payload["bill_name"], "buyer_gstin": invoice_payload["bill_gstin"],
-                    "total_pieces": invoice_payload["total_pieces"], "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
-                    "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
-                }).eq("invoice_no", invoice_payload["invoice_no"]).execute()
-                st.success(f"🎉 Historical record **{invoice_payload['invoice_no']}** updated successfully!")
-            else:
-                history_row = {
-                    "invoice_no": invoice_payload["invoice_no"], "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
-                    "buyer_name": invoice_payload["bill_name"], "buyer_gstin": invoice_payload["bill_gstin"],
-                    "total_pieces": invoice_payload["total_pieces"], "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
-                    "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
-                }
-                supabase.table("cntr_invoice_history").insert(history_row).execute()
-                st.success("🎉 New commercial invoice logged to history ledger cleanly!")
-            
-            st.session_state.pdf_ready_path = f_path
-            st.rerun()
-            
-        except Exception as save_err:
-            st.error(f"❌ Cloud Audit Exception: Failure during secure storage sync. Details: {str(save_err)}")
-            st.session_state.pdf_ready_path = None
-
-    if st.session_state.pdf_ready_path and os.path.exists(st.session_state.pdf_ready_path):
-        st.markdown("<br>", unsafe_allow_html=True)
-        with open(st.session_state.pdf_ready_path, "rb") as f:
-            st.download_button(
-                label="📥 Download Official Job-Work GST Invoice PDF", 
-                data=f, 
-                file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", 
-                mime="application/pdf",
-                width="stretch"
-            )
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    # Uses the updated syntax parameters without triggering console warnings
+    if st.button("🔒 Freeze & Stage Layout Configuration", width="stretch", disabled=st.session_state.invoice_staged):
+        st.session_state.invoice_staged = True
+        st.session_state.staged_serial = typed_serial
+        st.rerun()
+with col_btn2:
+    if st.button("🔓 Modify Parameters / Unfreeze Form", width="stretch", disabled=not st.session_state.invoice_staged):
+        st.session_state.invoice_staged = False
+        st.session_state.staged_serial = ""
+        st.session_state.loaded_from_history = False
+        st.session_state.historical_data = {}
+        st.session_state.pdf_ready_path = None
+        st.rerun()
