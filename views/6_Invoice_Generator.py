@@ -334,7 +334,7 @@ with col_btn2:
         st.session_state.pdf_ready_path = None
         st.rerun()
 # ============================================================================
-# PART 4: REFACTORED LINE ITEM AGGREGATION LOOP (FIXED TRUTH VALUE BUG)
+# PART 4: BULLETPROOF LINE ITEM AGGREGATION LOOP (AMBIGUITY ELIMINATED)
 # ============================================================================
 for idx, row in merged_summary.iterrows():
     p_num = str(row["part_number"])
@@ -342,27 +342,39 @@ for idx, row in merged_summary.iterrows():
     sim_qty, p_desc = int(row["qty_nos"]), str(row["description"]).upper()
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
     
-    if not match_part.empty:
-        # Protect against multi-row scalar dimension errors cleanly
-        p_weight_kg = float(match_part["weight_kg"].iloc[0]) if pd.notna(match_part["weight_kg"].iloc[0]) else 28.0
-        p_rate = float(match_part["rate_per_ton"].iloc[0]) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].iloc[0]) else 2650.00
-        
-        # FIX: Narrow lookups down to a single chosen column string to prevent Multi-Column Series crashes
-        hsn_cols_found = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
-        chosen_hsn_col = hsn_cols_found[0] if hsn_cols_found else None
-        
-        if chosen_hsn_col and pd.notna(match_part[chosen_hsn_col].iloc[0]):
-            db_hsn = str(match_part[chosen_hsn_col].iloc[0]).strip()
-        else:
-            db_hsn = "998349"
-    else:
-        p_weight_kg, p_rate, db_hsn = 28.0, 2650.00, "998349"
+    # Initialize robust defaults
+    p_weight_kg = 28.0
+    p_rate = 2650.00
+    db_hsn = "998349"
     
+    if not match_part.empty:
+        # Extract weight cleanly using positional item lookup
+        if "weight_kg" in match_part.columns:
+            val_wt = match_part["weight_kg"].iat[0]
+            if pd.notna(val_wt):
+                p_weight_kg = float(val_wt)
+                
+        # Extract rate cleanly using positional item lookup        
+        if "rate_per_ton" in match_part.columns:
+            val_rt = match_part["rate_per_ton"].iat[0]
+            if pd.notna(val_rt):
+                p_rate = float(val_rt)
+        
+        # EXTRACT HSN CLEANLY: Try potential column structures sequentially to avoid multi-column slices
+        hsn_val = None
+        if "hsn_code" in match_part.columns:
+            hsn_val = match_part["hsn_code"].iat[0]
+        elif "hsn_sac" in match_part.columns:
+            hsn_val = match_part["hsn_sac"].iat[0]
+            
+        if pd.notna(hsn_val) and str(hsn_val).strip() != "" and str(hsn_val).lower() != "none":
+            db_hsn = str(hsn_val).strip()
+
     hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)] if parsed_hsn_override_list else db_hsn
     s_date_raw, e_date_raw = str(row["txn_start_raw"]), str(row["txn_end_date_raw"])
     try:
-        st_d = datetime.strptime(s_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
-        en_d = datetime.strptime(e_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
+        st_d = datetime.strptime(s_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
+        en_d = datetime.strptime(e_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
         txn_date_range_display = f"{st_d} to {en_d}" if st_d != en_d else st_d
     except: txn_date_range_display = s_date_raw
     
