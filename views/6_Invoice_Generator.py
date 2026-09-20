@@ -96,17 +96,15 @@ def calculate_next_db_serial(target_date):
                 next_id = str(max(numeric_values) + 1).zfill(3)
     except: pass
     return f"{fy_prefix}{next_id}"
-
 # ============================================================================
 # SECTION 1: CORPORATE PROFILES
 # ============================================================================
-st.subheader("🏛️ CorporateProfiles")
+st.subheader("🏛️ Corporate Profiles")
 is_disabled = st.session_state.invoice_staged
 
 col_s1, col_s2 = st.columns(2)
 h_data = st.session_state.historical_data if st.session_state.loaded_from_history else {}
 
-# Safely wrap internal index arrays if loaded from history tracking table
 if isinstance(h_data, list) and len(h_data) > 0:
     h_data = h_data[0]
 elif not isinstance(h_data, dict):
@@ -117,7 +115,6 @@ with col_s1:
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"] if not corporate_df.empty else pd.DataFrame()
     owner_records = owner_df.to_dict(orient="records") if not owner_df.empty else []
     
-    # 🔒 FIX: Safely pull the absolute FIRST row dictionary element out of the data list array
     o_row = owner_records[0] if len(owner_records) > 0 else {}
     
     src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"), disabled=is_disabled)
@@ -144,7 +141,6 @@ with col_s2:
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options, index=default_selectbox_index, disabled=is_disabled)
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
         
-        # 🔒 FIX: Safely pull the absolute FIRST row dictionary element out of the buyer match array
         c_row = c_match[0] if c_match else {}
         
         bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"), disabled=is_disabled)
@@ -165,66 +161,7 @@ with col_s2:
 # SECTION 2: TIMELINE FILTERS
 # ============================================================================
 st.markdown("---")
-st.subheader("🗓️ TimelineFilters")
-col_d1, col_d2, col_d3 = st.columns(3)
-
-with col_d1:
-    today = date.today()
-    default_start = today - timedelta(days=30)
-    selected_range = st.date_input("Select Dispatch Range Window", value=(default_start, today), key="invoice_date_range", disabled=is_disabled)
-    start_date, end_date = selected_range if (isinstance(selected_range, tuple) and len(selected_range) == 2) else (today - timedelta(days=30), today)
-
-with col_d2:
-    catalog_df["display_name"] = catalog_df["part_number"].astype(str) + " - " + catalog_df["description"].astype(str).str.upper()
-    dropdown_options = ["ALL COMPONENT DISPATCHED RUNS"] + list(catalog_df["display_name"].unique())
-    selected_display = st.selectbox("Filter Dispatch by Component Scope", dropdown_options, index=0, disabled=is_disabled)
-    is_filtered_run = selected_display != "ALL COMPONENT DISPATCHED RUNS"
-
-with col_d3:
-    selected_txn_type = st.selectbox("Transaction Flow Type", ["Outward", "Inward", "All Transactions"], index=0, disabled=is_disabled)
-
-st.markdown("<br>", unsafe_allow_html=True)
-col_l1, col_l2 = st.columns(2)
-
-with col_l1:
-    same_as_billing = st.checkbox("Shipping Destination matches Profile Billing Address Coordinates", value=True, disabled=is_disabled)
-    ship_addr_override = st.text_area("Override Consignee Delivery Address", value=bill_address if same_as_billing else "", disabled=is_disabled)
-    place_of_supply = st.text_input("Place of Supply State Code Target", value=base_pos, disabled=is_disabled)
-
-with col_l2:
-    default_print_date = datetime.strptime(h_data["invoice_date"], "%Y-%m-%d").date() if "invoice_date" in h_data else today
-    invoice_date_input = st.date_input("Invoice Structural Printing Date", default_print_date, disabled=is_disabled)
-    
-    credit_days_input = st.number_input("Credit Payment Terms (Days Window)", min_value=0, max_value=365, value=7, step=1, disabled=is_disabled)
-    due_date_calculated = invoice_date_input + timedelta(days=credit_days_input)
-    st.text_input("Calculated Payment Due Target Date", value=due_date_calculated.strftime("%d-%b-%Y"), disabled=True)
-    
-    if not st.session_state.invoice_staged:
-        auto_serial_default = calculate_next_db_serial(invoice_date_input)
-    else:
-        auto_serial_default = st.session_state.staged_serial
-        
-    typed_serial = st.text_input("Invoice Serial Sequential Number #", value=auto_serial_default, disabled=is_disabled)
-    
-    if typed_serial and not st.session_state.invoice_staged and supabase:
-        try:
-            db_match = supabase.table("cntr_invoice_history").select("*").eq("invoice_no", typed_serial.strip()).execute()
-            if db_match.data and not st.session_state.loaded_from_history:
-                st.session_state.loaded_from_history = True
-                st.session_state.historical_data = db_match.data
-                st.toast(f"ℹ️ Historical Match Found: Loaded parameters for {typed_serial} automatically!")
-                st.rerun()
-            elif not db_match.data and st.session_state.loaded_from_history:
-                st.session_state.loaded_from_history = False
-                st.session_state.historical_data = {}
-                st.rerun()
-        except: pass
-
-# ============================================================================
-# SECTION 2: TIMELINE FILTERS
-# ============================================================================
-st.markdown("---")
-st.subheader("🗓️ TimelineFilters")
+st.subheader("🗓️ Timeline Filters")
 col_d1, col_d2, col_d3 = st.columns(3)
 
 with col_d1:
@@ -282,7 +219,7 @@ with col_l2:
 # SECTION 3: PRINT PREVIEW
 # ============================================================================
 st.markdown("---")
-st.subheader("⚙️ PrintPreview")
+st.subheader("⚙️ Print Preview")
 
 line_items_payload = []
 hsn_summary_map = {}
@@ -326,18 +263,18 @@ for idx, row in merged_summary.iterrows():
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
     
     if not match_part.empty:
-        p_weight_kg = float(match_part["weight_kg"].values) if pd.notna(match_part["weight_kg"].values) else 28.0
-        p_rate = float(match_part["rate_per_ton"].values) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values) else 2650.00
+        p_weight_kg = float(match_part["weight_kg"].values[0]) if pd.notna(match_part["weight_kg"].values[0]) else 28.0
+        p_rate = float(match_part["rate_per_ton"].values[0]) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values[0]) else 2650.00
         hsn_col = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
-        db_hsn = str(match_part[hsn_col].values).strip() if hsn_col and pd.notna(match_part[hsn_col].values) else "998349"
+        db_hsn = str(match_part[hsn_col].values[0]).strip() if hsn_col and pd.notna(match_part[hsn_col].values[0]) else "998349"
     else:
         p_weight_kg, p_rate, db_hsn = 28.0, 2650.00, "998349"
     
     hsn_code = parsed_hsn_override_list[len(line_items_payload) % len(parsed_hsn_override_list)] if parsed_hsn_override_list else db_hsn
     s_date_raw, e_date_raw = str(row["txn_start_raw"]), str(row["txn_end_date_raw"])
     try:
-        st_d = datetime.strptime(s_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
-        en_d = datetime.strptime(e_date_raw.split(" "), "%Y-%m-%d").strftime("%d-%b-%Y")
+        st_d = datetime.strptime(s_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
+        en_d = datetime.strptime(e_date_raw.split(" ")[0], "%Y-%m-%d").strftime("%d-%b-%Y")
         txn_date_range_display = f"{st_d} to {en_d}" if st_d != en_d else st_d
     except: txn_date_range_display = s_date_raw
     
@@ -427,7 +364,6 @@ def generate_invoice_pdf_file(data):
         ["", Paragraph("Terms of Delivery", meta_lbl), ""]
     ]
     
-    # 🔒 Width assignments map to 270 + 135 + 135 = 540 max горизонтальный horizontal printable space
     top_table = Table(header_data, colWidths=[270, 135, 135])
     top_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')),
@@ -436,7 +372,6 @@ def generate_invoice_pdf_file(data):
     story.append(top_table)
     story.append(Spacer(1, 8))
     
-    # 🔒 Spacing columns map precisely to 25 + 175 + 55 + 45 + 50 + 55 + 45 + 90 = 540 points layout matrix
     col_widths = [25, 175, 55, 45, 50, 55, 45, 90]
     
     table_content = [[Paragraph("SI<br/>No", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per<br/>Pieces", hdr_style), Paragraph("Total Weight<br/>In Ton", hdr_style), Paragraph("Per<br/>Ton<br/>Rate", hdr_style), Paragraph("Amount", hdr_style)]]
@@ -457,7 +392,6 @@ def generate_invoice_pdf_file(data):
         summary_data.append([Paragraph(hsn_code, cell_center), Paragraph(f"Rs. {vals['taxable_value']:,.2f}", cell_right), Paragraph("18%", cell_center), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_right), Paragraph(f"Rs. {vals['tax_amount']:,.2f}", cell_right)])
     summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold)])
     
-    # 🔒 Length constraints map precisely to 100 + 110 + 80 + 125 + 125 = 540 points alignment
     summary_table = Table(summary_data, colWidths=[100, 110, 80, 125, 125])
     summary_table.setStyle(TableStyle([
         ('SPAN', (0,0), (3,0)), ('SPAN', (0,1), (4,1)), ('GRID', (0,2), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)
@@ -472,7 +406,6 @@ def generate_invoice_pdf_file(data):
     decl_p = Paragraph("<b>Declaration</b><br/>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", meta_body)
     sign_p = Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RSign', parent=meta_body, alignment=2))
     
-    # 🔒 Dimensions balance points equal 300 + 240 = 540 horizontal width footprint split
     footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=[300, 240])
     footer_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 5)]))
     story.append(footer_table)
