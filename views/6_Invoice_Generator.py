@@ -114,7 +114,6 @@ with col_s1:
     st.markdown("**🛡️ Source Company Details (Seller End)**")
     owner_df = corporate_df[corporate_df["cmp_number"].str.lower() == "own01"] if not corporate_df.empty else pd.DataFrame()
     owner_records = owner_df.to_dict(orient="records") if not owner_df.empty else []
-    
     o_row = owner_records[0] if len(owner_records) > 0 else {}
     
     src_name = st.text_input("Seller Legal Name", clean_db_val(o_row, "company_name", "CLASSIC INDUSTRIES"), disabled=is_disabled)
@@ -140,7 +139,6 @@ with col_s2:
         corp_options = [r["company_name"] for r in buyer_records]
         selected_client_name = st.selectbox("Select Customer from Cloud Registry", corp_options, index=default_selectbox_index, disabled=is_disabled)
         c_match = [r for r in buyer_records if r["company_name"] == selected_client_name]
-        
         c_row = c_match[0] if c_match else {}
         
         bill_name = st.text_input("Buyer Registered Corporate Name", clean_db_val(c_row, "company_name", "REVENT METALCAST LIMITED"), disabled=is_disabled)
@@ -156,7 +154,6 @@ with col_s2:
         bill_person = st.text_input("Attn / Customer Contact Person", "Operations Head", disabled=is_disabled)
         bill_no = st.text_input("Buyer Contact Phone Number", "9999999999", disabled=is_disabled)
         base_pos = "08-RAJASTHAN"
-
 # ============================================================================
 # SECTION 2: TIMELINE FILTERS
 # ============================================================================
@@ -216,7 +213,7 @@ with col_l2:
                 st.rerun()
         except: pass
 # ============================================================================
-# SECTION 3: LINE ITEM AGGREGATION & INVOICE PAYLOAD COMPILATION
+# SECTION 3: PRINT PREVIEW & INVOICE PAYLOAD COMPILATION
 # ============================================================================
 st.markdown("---")
 st.subheader("⚙️ Print Preview")
@@ -249,7 +246,7 @@ except Exception as e:
     iso_start, iso_end = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
     merged_summary = pd.DataFrame([
         {"part_number": "458/20418P", "description": "DRIVE HEAD CASING", "hsn_code": "998349", "qty_nos": 106, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
-        {"part_number": "589-M6716", "description": "REAR CASE CASTING-589-M6716", "hsn_code": "998349", "qty_nos": 110, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
+        {"part_number": "589-M6715", "description": "REAR CASE CASTING-589-M6715", "hsn_code": "998349", "qty_nos": 110, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
         {"part_number": "589-M6716", "description": "REAR CASE CASTING-589-M6716", "hsn_code": "998349", "qty_nos": 104, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
         {"part_number": "91776325", "description": "CNH HOUSING CASTING MCH UG", "hsn_code": "998349", "qty_nos": 40, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
         {"part_number": "9330093", "description": "EATON GEARCASE CASTING", "hsn_code": "998349", "qty_nos": 289, "txn_start_raw": iso_start, "txn_end_date_raw": iso_end},
@@ -263,10 +260,11 @@ for idx, row in merged_summary.iterrows():
     match_part = catalog_df[catalog_df["part_number"] == p_num] if not catalog_df.empty else pd.DataFrame()
     
     if not match_part.empty:
-        p_weight_kg = float(match_part["weight_kg"].values) if pd.notna(match_part["weight_kg"].values) else 28.0
-        p_rate = float(match_part["rate_per_ton"].values) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].values) else 2650.00
+        # FIX: Slices the dataframe matching index coordinate matrices to avoid dimension scalar errors
+        p_weight_kg = float(match_part["weight_kg"].iloc[0]) if pd.notna(match_part["weight_kg"].iloc[0]) else 28.0
+        p_rate = float(match_part["rate_per_ton"].iloc[0]) if "rate_per_ton" in match_part.columns and pd.notna(match_part["rate_per_ton"].iloc[0]) else 2650.00
         hsn_col = [c for c in match_part.columns if c in ["hsn_sac", "hsn_code"]]
-        db_hsn = str(match_part[hsn_col].values).strip() if hsn_col and pd.notna(match_part[hsn_col].values) else "998349"
+        db_hsn = str(match_part[hsn_col].iloc[0]).strip() if hsn_col and pd.notna(match_part[hsn_col].iloc[0]) else "998349"
     else:
         p_weight_kg, p_rate, db_hsn = 28.0, 2650.00, "998349"
     
@@ -299,13 +297,12 @@ if not summary_df.empty:
     total_tax_sum = round(float(total_taxable_subtotal * 0.18), 2)
     grand_invoice_total = round(total_taxable_subtotal + total_tax_sum, 2)
     
-    # FIX 1 & 2: Explicitly round and map numerical values to prevent integer indexing bugs
     try:
         words_main = num2words(int(round(grand_invoice_total)), lang='en_IN').title().replace("-", " ")
         invoice_total_words = f"{words_main} Rupees Only."
         words_tax = num2words(int(round(total_tax_sum)), lang='en_IN').title().replace('-', ' ')
         tax_total_words = f"{words_tax} Rupees Only."
-    except Exception as e:
+    except: 
         invoice_total_words = "Amount Calculated Dynamically."
         tax_total_words = "Calculated Automatically."
     
@@ -314,7 +311,6 @@ else:
     total_invoice_pieces, total_invoice_weight_mt, total_taxable_subtotal, total_tax_sum, grand_invoice_total = 0, 0.0, 0.0, 0.0, 0.0
     invoice_total_words, tax_total_words = "Zero Rupees Only.", "Zero Rupees Only."
 
-# Build updated state mappings incorporating standard explicit location states
 invoice_payload = {
     "invoice_no": str(typed_serial), "start_date": invoice_date_input.strftime("%d-%b-%Y"), "end_date": due_date_calculated.strftime("%d-%b-%Y"),
     "place_of_supply": str(place_of_supply), "src_name": str(src_name), "src_address": str(src_address), "src_gstin": str(src_gstin),
@@ -322,6 +318,21 @@ invoice_payload = {
     "line_items": line_items_payload, "taxable_amount": total_taxable_subtotal, "igst": total_tax_sum, "grand_total": grand_invoice_total,
     "total_words": invoice_total_words, "tax_total_words": tax_total_words, "hsn_map": hsn_summary_map, "total_invoice_weight_mt": total_invoice_weight_mt, "total_pieces": total_invoice_pieces
 }
+
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    if st.button("🔒 Freeze & Stage Layout Configuration", width="stretch", disabled=st.session_state.invoice_staged):
+        st.session_state.invoice_staged = True
+        st.session_state.staged_serial = typed_serial
+        st.rerun()
+with col_btn2:
+    if st.button("🔓 Modify Parameters / Unfreeze Form", width="stretch", disabled=not st.session_state.invoice_staged):
+        st.session_state.invoice_staged = False
+        st.session_state.staged_serial = ""
+        st.session_state.loaded_from_history = False
+        st.session_state.historical_data = {}
+        st.session_state.pdf_ready_path = None
+        st.rerun()
 # ============================================================================
 # SECTION 4: PDF BLOCKS MATRIX GENERATOR
 # ============================================================================
@@ -344,7 +355,7 @@ def generate_invoice_pdf_file(data):
     story.append(Paragraph("Tax Invoice", title_style))
     story.append(Spacer(1, 6))
     
-    # FIX 5: Append missing clear state designations to company address blocks
+    # FIX: Explicit state configurations appended onto address nodes
     src_addr_formatted = f"{data['src_address'].replace('\n','<br/>')}<br/><b>State Name:</b> UTTAR PRADESH, <b>Code:</b> 09"
     bill_addr_formatted = f"{data['ship_address'].replace('\n','<br/>')}<br/><b>State Name:</b> RAJASTHAN, <b>Code:</b> 08"
     
@@ -371,22 +382,15 @@ def generate_invoice_pdf_file(data):
     table_content = [[Paragraph("SI<br/>No", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per<br/>Pieces", hdr_style), Paragraph("Total Weight<br/>In Ton", hdr_style), Paragraph("Per<br/>Ton<br/>Rate", hdr_style), Paragraph("Amount", hdr_style)]]
     
     for idx, item in enumerate(data["line_items"]):
-        # FIX 6: Apply structural pipeline delimiters between Part Numbers and Descriptions
+        # FIX: Pipeline character inserted between descriptors
         goods_description = f"<b>{item['part_number']}</b><br/> | — {item['description']}"
-        
-        # FIX 7: Strip currency symbols from line items
+        # FIX: Currency notation symbol removed from standard grid cells
         table_content.append([
-            Paragraph(str(idx+1), cell_center), 
-            Paragraph(goods_description, cell_left), 
-            Paragraph(item["hsn"], cell_center), 
-            Paragraph(f"{item['qty']:,}", cell_center), 
-            Paragraph(f"{item['wt_pc']:.1f}KG", cell_center), 
-            Paragraph(f"{item['total_wt_mt']:.4f}", cell_center), 
-            Paragraph(f"{int(item['rate_mt'])}", cell_center), 
+            Paragraph(str(idx+1), cell_center), Paragraph(goods_description, cell_left), Paragraph(item["hsn"], cell_center),
+            Paragraph(f"{item['qty']:,}", cell_center), Paragraph(f"{item['wt_pc']:.1f}KG", cell_center),
+            Paragraph(f"{item['total_wt_mt']:.4f}", cell_center), Paragraph(f"{int(item['rate_mt'])}", cell_center),
             Paragraph(f"{item['taxable_value']:,.2f}", cell_right)
         ])
-    
-    # FIX 7: Retain Rupees notation exclusively on totals
     table_content.append(["", Paragraph("<b>Total</b>", cell_left), "", Paragraph(f"<b>{data['total_pieces']}</b>", cell_center), "", Paragraph(f"<b>{data['total_invoice_weight_mt']:.4f}</b>", cell_center), "", Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold)])
     
     item_table = Table(table_content, colWidths=col_widths, repeatRows=1)
@@ -398,21 +402,17 @@ def generate_invoice_pdf_file(data):
         [Paragraph(f"<b>{data['total_words']}</b>", meta_bold), "", "", "", ""],
         [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
     ]
-    
     for hsn_code, vals in data["hsn_map"].items():
-        # FIX 3: Add explicit values to tax rate headers (e.g. Integrated Tax Amount + Rate)
-        formatted_tax_rate_label = f"IGST 18% (Rs. {vals['tax_amount']:,.2f})"
+        # FIX: Appended calculated amounts onto row tax headers
+        tax_rate_label = f"IGST 18% (Rs. {vals['tax_amount']:,.2f})"
         summary_data.append([
-            Paragraph(hsn_code, cell_center), 
-            Paragraph(f"{vals['taxable_value']:,.2f}", cell_right), # FIX 7: Removed Rs.
-            Paragraph(formatted_tax_rate_label, cell_center), 
-            Paragraph(f"{vals['tax_amount']:,.2f}", cell_right),    # FIX 7: Removed Rs.
-            Paragraph(f"{vals['tax_amount']:,.2f}", cell_right)     # FIX 7: Removed Rs.
+            Paragraph(hsn_code, cell_center), Paragraph(f"{vals['taxable_value']:,.2f}", cell_right),
+            Paragraph(tax_rate_label, cell_center), Paragraph(f"{vals['tax_amount']:,.2f}", cell_right),
+            Paragraph(f"{vals['tax_amount']:,.2f}", cell_right)
         ])
-        
     summary_data.append([Paragraph("<b>Total</b>", cell_center), Paragraph(f"<b>Rs. {data['taxable_amount']:,.2f}</b>", cell_right_bold), "", Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold), Paragraph(f"<b>Rs. {data['igst']:,.2f}</b>", cell_right_bold)])
     
-    summary_table = Table(summary_data, colWidths=[100, 110, 110, 110, 110])
+    summary_table = Table(summary_data, colWidths=[100, 110, 80, 125, 125])
     summary_table.setStyle(TableStyle([
         ('SPAN', (0,0), (3,0)), ('SPAN', (0,1), (4,1)), ('GRID', (0,2), (-1,-1), 0.5, colors.HexColor('#000000')), ('PADDING', (0,0), (-1,-1), 4)
     ]))
@@ -426,15 +426,11 @@ def generate_invoice_pdf_file(data):
     decl_p = Paragraph("<b>Declaration</b><br/>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.", meta_body)
     sign_p = Paragraph(f"for <b>{data['src_name']}</b><br/><br/><br/><br/><b>Authorised Signatory</b>", ParagraphStyle('RSign', parent=meta_body, alignment=2))
     
-    # FIX 4: Span declaration block to clean horizontal bounds across grid lines
-    footer_table = Table([
-        [bank_p, sign_p], 
-        [decl_p, ""]
-    ], colWidths=[300, 240])
+    # FIX: Fully spanned horizontal matrix blocks assigned across grid columns
+    footer_table = Table([[bank_p, sign_p], [decl_p, ""]], colWidths=[300, 240])
     footer_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'), 
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#000000')), 
-        ('SPAN', (0,1), (1,1)), # Safe signature padding wrap
         ('SPAN', (0,1), (1,1)), 
         ('PADDING', (0,0), (-1,-1), 5)
     ]))
@@ -445,20 +441,52 @@ def generate_invoice_pdf_file(data):
     doc.build(story)
     return pdf_filename
 # ============================================================================
-# SECTION 5: CLEAN DEPRECATION-FREE STREAMLIT ACTION MODULES
+# SECTION 5: DOWNLOAD/PRINT CENTER
 # ============================================================================
-col_btn1, col_btn2 = st.columns(2)
-with col_btn1:
-    # Uses the updated syntax parameters without triggering console warnings
-    if st.button("🔒 Freeze & Stage Layout Configuration", width="stretch", disabled=st.session_state.invoice_staged):
-        st.session_state.invoice_staged = True
-        st.session_state.staged_serial = typed_serial
-        st.rerun()
-with col_btn2:
-    if st.button("🔓 Modify Parameters / Unfreeze Form", width="stretch", disabled=not st.session_state.invoice_staged):
-        st.session_state.invoice_staged = False
-        st.session_state.staged_serial = ""
-        st.session_state.loaded_from_history = False
-        st.session_state.historical_data = {}
-        st.session_state.pdf_ready_path = None
-        st.rerun()
+st.markdown("---")
+st.subheader("📥 Download/Print Center")
+
+if not st.session_state.invoice_staged:
+    st.info("💡 Review your configurations and click 'Freeze & Stage Layout Configuration' above to unlock the document generator console.")
+    st.session_state.pdf_ready_path = None
+else:
+    if st.button("🚀 Finalize, Commit & Generate Official Commercial Invoice PDF", key="finalize_btn", width="stretch"):
+        f_path = generate_invoice_pdf_file(invoice_payload)
+        is_update_override = st.session_state.loaded_from_history
+        
+        try:
+            if is_update_override:
+                supabase.table("cntr_invoice_history").update({
+                    "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
+                    "buyer_name": invoice_payload["bill_name"], "buyer_gstin": invoice_payload["bill_gstin"],
+                    "total_pieces": invoice_payload["total_pieces"], "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
+                    "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
+                }).eq("invoice_no", invoice_payload["invoice_no"]).execute()
+                st.success(f"🎉 Historical record **{invoice_payload['invoice_no']}** updated successfully!")
+            else:
+                history_row = {
+                    "invoice_no": invoice_payload["invoice_no"], "invoice_date": invoice_date_input.strftime("%Y-%m-%d"),
+                    "buyer_name": invoice_payload["bill_name"], "buyer_gstin": invoice_payload["bill_gstin"],
+                    "total_pieces": invoice_payload["total_pieces"], "total_weight_mt": invoice_payload["total_invoice_weight_mt"],
+                    "taxable_amount": invoice_payload["taxable_amount"], "igst_amount": invoice_payload["igst"], "grand_total": invoice_payload["grand_total"]
+                }
+                supabase.table("cntr_invoice_history").insert(history_row).execute()
+                st.success("🎉 New commercial invoice logged to history ledger cleanly!")
+            
+            st.session_state.pdf_ready_path = f_path
+            st.rerun()
+            
+        except Exception as save_err:
+            st.error(f"❌ Cloud Audit Exception: Failure during secure storage sync. Details: {str(save_err)}")
+            st.session_state.pdf_ready_path = None
+
+    if st.session_state.pdf_ready_path and os.path.exists(st.session_state.pdf_ready_path):
+        st.markdown("<br>", unsafe_allow_html=True)
+        with open(st.session_state.pdf_ready_path, "rb") as f:
+            st.download_button(
+                label="📥 Download Official Job-Work GST Invoice PDF", 
+                data=f, 
+                file_name=f"Invoice_{invoice_payload['invoice_no'].replace('/', '_')}.pdf", 
+                mime="application/pdf",
+                width="stretch"
+            )
