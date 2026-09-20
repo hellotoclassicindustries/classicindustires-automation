@@ -392,7 +392,7 @@ def generate_invoice_pdf_file(data):
     table_content = [[Paragraph("SI<br/>No", hdr_style), Paragraph("Description of Goods", hdr_style), Paragraph("HSN/SAC", hdr_style), Paragraph("Quantity", hdr_style), Paragraph("Weight Per<br/>Pieces", hdr_style), Paragraph("Total Weight<br/>In Ton", hdr_style), Paragraph("Per<br/>Ton<br/>Rate", hdr_style), Paragraph("Amount", hdr_style)]]
     
     for idx, item in enumerate(data["line_items"]):
-        goods_description = f"<b>{item['part_number']}</b><br/> — {item['description']}"
+        goods_description = f"<b>{item['part_number']}</b><br/> {item['description']}"
         table_content.append([
             Paragraph(str(idx+1), cell_center), Paragraph(goods_description, cell_left), Paragraph(item["hsn"], cell_center),
             Paragraph(f"{item['qty']:,}", cell_center), Paragraph(f"{item['wt_pc']:.1f}KG", cell_center),
