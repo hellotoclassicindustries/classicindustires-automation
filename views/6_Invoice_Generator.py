@@ -411,7 +411,7 @@ def generate_invoice_pdf_file(data):
         [Paragraph("HSN/SAC", hdr_style), Paragraph("Taxable Value", hdr_style), Paragraph("Integrated Tax Rate", hdr_style), Paragraph("Integrated Tax Amount", hdr_style), Paragraph("Total Tax Amount", hdr_style)]
     ]
     for hsn_code, vals in data["hsn_map"].items():
-        tax_rate_label = f"IGST 18% (Rs. {vals['tax_amount']:,.2f})"
+        tax_rate_label = f"{vals['tax_amount']:,.2f} (18%)"
         summary_data.append([
             Paragraph(hsn_code, cell_center), Paragraph(f"{vals['taxable_value']:,.2f}", cell_right),
             Paragraph(tax_rate_label, cell_center), Paragraph(f"{vals['tax_amount']:,.2f}", cell_right),
