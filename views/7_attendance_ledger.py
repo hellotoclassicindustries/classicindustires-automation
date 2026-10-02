@@ -203,39 +203,109 @@ else:
 
     st.dataframe(render_df, hide_index=True, width="stretch", column_config=cfg)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A (PDF COMPILER LAYOUT)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A1 (OVERRIDE FILTER ROW)
 # ============================================================================
 
     st.markdown("---")
     st.markdown("### 🧾 Interactive Salary Slip Generator Window")
-    st.markdown("Select any worker profile from the list to compile a payslip.")
+    st.markdown("Select an employee row and apply specific overrides.")
 
     if filtered_df.empty:
-        st.warning("⚠️ No rows currently match your filter selections.")
+        st.warning("⚠️ No rows currently match your global ledger filters.")
     else:
         employee_options = []
         for idx, row in filtered_df.iterrows():
             employee_options.append(f"{row['EMP_ID']} - {row['EMP_Name']} ({row['Month_Year']})")
             
-        selected_emp_string = st.selectbox("Choose Profile:", options=employee_options)
+        selected_emp_string = st.selectbox(
+            "Choose Profile Target for Payslip:", 
+            options=employee_options, 
+            key="slip_profile_select"
+        )
         
         if selected_emp_string:
             selected_idx = employee_options.index(selected_emp_string)
-            emp_data = filtered_df.iloc[selected_idx]
+            emp_data = filtered_df.iloc[selected_idx].copy()
             
-            slip_col1, slip_col2 = st.columns(2)
-            with slip_col1:
+            st.markdown("#### 🛠️ On-Screen Payslip Parameter Overrides")
+            slip_f_col1, slip_filter_col2, slip_filter_col3 = st.columns(3)
+            
+            with slip_f_col1:
+                # 📅 1. Pay Cycle Date Frame Override Filter
+                override_month = st.text_input(
+                    "Override Pay Period (Month-Year):", 
+                    value=str(emp_data['Month_Year']), 
+                    key="slip_override_month"
+                )
+                emp_data['Month_Year'] = override_month
+                
+            with slip_filter_col2:
+                # 👤 2. Employee Status Override Toggle Filter
+                override_status = st.selectbox(
+                    "Override Profile Status:", 
+                    options=["Active", "In-Active"], 
+                    index=0 if str(emp_data['EMP_Status']).upper() == "ACTIVE" else 1, 
+                    key="slip_override_status"
+                )
+                emp_data['EMP_Status'] = override_status
+                
+            with slip_filter_col3:
+                # 📅 3. Day Duration Truncation Range Slider Filter
+                slip_start_day, slip_end_day = st.slider(
+                    "Select Day Duration Truncation Range:",
+                    min_value=1, max_value=31, value=(1, 31), 
+                    key="slip_day_duration_slider"
+                )
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A2 (RECALCULATION ENGINE & CARD)
+# ============================================================================
+
+            # Recalculate financial parameters instantly based on live on-screen overrides
+            days_count_override = 0.0
+            days_array_source = []
+            
+            # Extract day grid marks from the selected range bounds
+            for day in range(slip_start_day, slip_end_day + 1):
+                day_mark = str(emp_data.get(f"D{day:02d}", "")).strip().upper()
+                days_array_source.append(day_mark)
+                if "P" in day_mark or (day_mark.isdigit() and float(day_mark) > 0):
+                    days_count_override += 1.0
+            
+            # Recompute total hour layers dynamically using standard 12-hour shifts
+            hours_worked_override = days_count_override * 12.0
+            emp_data['Total_Days'] = days_count_override
+            emp_data['Total_Hours'] = hours_worked_override
+            
+            # Run the dynamic pay engine formula based on your chosen status filter override
+            if str(emp_data['EMP_Status']).upper() == "ACTIVE":
+                standard_monthly_days = 26.0
+                hourly_rate_recalculated = (float(emp_data['Base_Monthly_Comp']) / standard_monthly_days) / 12.0
+                gross_payout_recalculated = hourly_rate_recalculated * hours_worked_override
+            else:
+                hourly_rate_recalculated = 0.00
+                gross_payout_recalculated = 0.00
+                
+            emp_data['Rate_Per_Hour'] = hourly_rate_recalculated
+            emp_data['Gross_Payout'] = gross_payout_recalculated
+            
+            # Render Live Recalculated Values Card on the screen
+            slip_card_col1, slip_card_col2 = st.columns(2)
+            with slip_card_col1:
                 st.markdown(f"**Employee ID & Name:** {emp_data['EMP_ID']} - {emp_data['EMP_Name']}")
                 st.markdown(f"**Pay Cycle Period:** {emp_data['Month_Year']}")
-                st.markdown(f"**Roster Profile Status:** {emp_data['EMP_Status']}")
-                st.markdown(f"**Total Days Worked:** {emp_data['Total_Days']:.1f} Days")
-            with slip_col2:
-                st.markdown(f"**Base Monthly Salary:** ₹ {emp_data['Base_Monthly_Comp']:,.2f}")
-                st.markdown(f"**Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr")
-                st.markdown(f"**Total Hours Logged:** {emp_data['Total_Hours']:.2f} Hours")
+                st.markdown(f"**Roster Profile Status:** `{emp_data['EMP_Status']}`")
+                st.markdown(f"**Truncated Range Worked:** {emp_data['Total_Days']:.1f} Days (Days {slip_start_day} to {slip_end_day})")
+            with slip_card_col2:
+                st.markdown(f"**Base Configured Salary:** ₹ {emp_data['Base_Monthly_Comp']:,.2f}")
+                st.markdown(f"**Calculated Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr")
+                st.markdown(f"**Recalculated Hours Logged:** {emp_data['Total_Hours']:.2f} Hours")
                 st.markdown(f"### **Net Payroll Payout:** ₹ {emp_data['Gross_Payout']:,.2f}")
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A3 (PDF INGESTION CORE)
+# ============================================================================
 
-            def generate_salary_slip_pdf(data):
+            # Professional PDF compilation engine
+            def generate_salary_slip_pdf(data, s_day, e_day):
                 buffer = io.BytesIO()
                 doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
                 story = []
@@ -250,8 +320,7 @@ else:
                 story.append(Paragraph("Automated Employee Monthly Payslip Statement", sub_style))
                 story.append(Spacer(1, 15))
                 
-                # 📐 GRID MATRIX CO-RELATION WIDTHS (130 points per cell footprint)
-                cw1 = [130, 130, 130, 130]
+                cw1 =
                 table_data = [
                     [Paragraph("<b>Employee ID:</b>", body_style), Paragraph(str(data['EMP_ID']), body_style), Paragraph("<b>Pay Period:</b>", body_style), Paragraph(str(data['Month_Year']), body_style)],
                     [Paragraph("<b>Employee Name:</b>", body_style), Paragraph(str(data['EMP_Name']), body_style), Paragraph("<b>Roster Status:</b>", body_style), Paragraph(str(data['EMP_Status']), body_style)],
@@ -269,14 +338,13 @@ else:
                 
                 story.append(Paragraph("Earnings and Attendance Calculation Matrix Logs", heading_style))
                 
-                # 📐 GRID MATRIX CO-RELATION WIDTHS (Earnings grid spacing blocks)
-                cw2 = [220, 150, 150]
+                cw2 =
                 salary_data = [
-                    [Paragraph("<b>Description</b>", body_style), Paragraph("<b>Attendance Metric</b>", body_style), Paragraph("<b>Gross Payout</b>", body_style)],
+                    [Paragraph("<b>Description</b>", body_style), Paragraph("<b>Metric Value</b>", body_style), Paragraph("<b>Calculated Gross Payout</b>", body_style)],
                     [Paragraph("Base Monthly Salary Rate", body_style), Paragraph("-", body_style), Paragraph(f"INR {data['Base_Monthly_Comp']:,.2f}", body_style)],
                     [Paragraph("Calculated Hourly Processing Rate", body_style), Paragraph(f"INR {data['Rate_Per_Hour']:,.2f} / hr", body_style), Paragraph("-", body_style)],
-                    [Paragraph("Total Attended Days Logged", body_style), Paragraph(f"{data['Total_Days']:.1f} Days", body_style), Paragraph("-", body_style)],
-                    [Paragraph("Total Logged Productive Hours", body_style), Paragraph(f"{data['Total_Hours']:.2f} Hours", body_style), Paragraph("-", body_style)],
+                    [Paragraph(f"Truncated Days Logged (Days {s_day}-{e_day})", body_style), Paragraph(f"{data['Total_Days']:.1f} Days", body_style), Paragraph("-", body_style)],
+                    [Paragraph("Total Recalculated Productive Hours", body_style), Paragraph(f"{data['Total_Hours']:.2f} Hours", body_style), Paragraph("-", body_style)],
                     [Paragraph("Extra Over_Time Balance Hours", body_style), Paragraph(f"{data['Over_Time']:.2f} Hours", body_style), Paragraph("-", body_style)],
                     [Paragraph("Short Less_Time Balance Hours", body_style), Paragraph(f"{data['Less_Time']:.2f} Hours", body_style), Paragraph("-", body_style)],
                     [Paragraph("<b>Net Monthly Payroll Payout</b>", body_style), Paragraph("-", body_style), Paragraph(f"<b>INR {data['Gross_Payout']:,.2f}</b>", body_style)],
@@ -292,7 +360,7 @@ else:
                 story.append(t2)
                 story.append(Spacer(1, 40))
                 
-                cw3 = [260, 260]
+                cw3 =
                 sig_data = [
                     [Paragraph("_____________________________<br/>Authorized Signatory Signature", body_style), Paragraph("_____________________________<br/>Employee Acknowledgment Signature", body_style)]
                 ]
@@ -304,70 +372,13 @@ else:
                 buffer.seek(0)
                 return buffer.getvalue()
 
-            pdf_data = generate_salary_slip_pdf(emp_data)
+            pdf_data = generate_salary_slip_pdf(emp_data, slip_start_day, slip_end_day)
             
             st.download_button(
                 label="📥 Generate & Download Salary Slip PDF",
                 data=pdf_data,
                 file_name=f"Salary_Slip_{emp_data['EMP_ID']}_{emp_data['Month_Year']}.pdf",
                 mime="application/pdf",
-                type="primary"
+                type="primary",
+                key="slip_pdf_download_btn"
             )
-# ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT B (MASTER REGISTRY DIRECTORY)
-# ============================================================================
-
-    # ============================================================================
-    # 👥 ACTIVE EMPLOYEE DIRECTORY REGISTRY MODULE
-    # ============================================================================
-    st.markdown("---")
-    st.markdown("### 👥 Active Employee Master Registry Directory")
-    
-    if not master_emp_data:
-        st.warning("⚠️ Profile Link Alert: No workforce data entries located inside public.cntr_employee_master.")
-    else:
-        master_rows_list = []
-        for emp in master_emp_data:
-            if emp.get("show") is False: continue
-            
-            master_rows_list.append({
-                "Roster_Status": emp.get("employee_status") or "Active",
-                "EMP_ID": emp.get("employee_id") or "N/A",
-                "Employee_Name": emp.get("employee_name") or "Unnamed",
-                "Shift_Hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
-                "Start_Onboarding_Date": emp.get("start_date") or "N/A",
-                "Last_Day_Worked": emp.get("last_day_of_work") or "N/A",
-                "Contact_Number": emp.get("contact") or "N/A",
-                "ID_Proof_Details": emp.get("id_proof") or "N/A",
-                "Monthly_Compensation": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00
-            })
-            
-        master_df = pd.DataFrame(master_rows_list)
-        
-        dir_col1, dir_col2, dir_col3 = st.columns(3)
-        with dir_col1:
-            search_dir_id = st.text_input("Filter Directory by Employee ID:", "", key="dir_id_input").strip()
-        with dir_col2:
-            search_dir_name = st.text_input("Filter Directory by Employee Name:", "", key="dir_name_input").strip()
-        with dir_col3:
-            search_dir_status = st.selectbox("Filter Directory by Profile Status:", options=["All Profiles", "Active Only", "In-Active Only"], key="dir_status_input")
-            
-        if search_dir_id:
-            master_df = master_df[master_df["EMP_ID"].astype(str).str.contains(search_dir_id, case=False, na=False)]
-        if search_dir_name:
-            master_df = master_df[master_df["Employee_Name"].astype(str).str.contains(search_dir_name, case=False, na=False)]
-            
-        if search_dir_status == "Active Only":
-            master_df = master_df[master_df["Roster_Status"].str.upper() == "ACTIVE"]
-        elif search_dir_status == "In-Active Only":
-            master_df = master_df[master_df["Roster_Status"].str.upper() == "IN-ACTIVE"]
-            
-        dir_cfg = {
-            "Roster_Status": st.column_config.TextColumn("Roster Status", width="small"),
-            "EMP_ID": st.column_config.TextColumn("EMP ID", width="small"),
-            "Employee_Name": st.column_config.TextColumn("Employee Name", width="medium"),
-            "Shift_Hours": st.column_config.NumberColumn("Scheduled Shift (Hrs)", format="%.2f", width="small"),
-            "Monthly_Compensation": st.column_config.NumberColumn("Compensation", format="₹%.2f", width="small")
-        }
-        
-        st.dataframe(master_df, hide_index=True, width="stretch", column_config=dir_cfg)
