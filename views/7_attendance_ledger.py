@@ -1,18 +1,24 @@
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (READ-ONLY REPORTING INFRASTRUCTURE)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (API ROUTING & INGESTION)
 # ============================================================================
 
 import streamlit as st
 import pandas as pd
 import requests
 import json
+import io
+import datetime
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 # 🛰️ Secure Secret Credentials Resolution Routing
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except Exception as e:
-    st.error("❌ Missing Infrastructure Secrets Configuration inside Streamlit Dashboard settings.")
+    st.error("❌ Missing Infrastructure Secrets Configuration inside Settings.")
     st.stop()
 
 HEADERS = {
@@ -21,7 +27,7 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-@st.cache_data(ttl=2) # 2-second lightning cache for instant visualization updates
+@st.cache_data(ttl=2)
 def fetch_raw_attendance_feed():
     """Fetches full attendance matrix from Supabase public.raw_attendance_feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
@@ -35,7 +41,7 @@ def fetch_raw_attendance_feed():
 
 @st.cache_data(ttl=15)
 def fetch_cntr_employee_master():
-    """Queries production employee metadata profile registries out of public.cntr_employee_master"""
+    """Queries production employee metadata profile registries"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master?order=employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -45,17 +51,17 @@ def fetch_cntr_employee_master():
     except Exception:
         return []
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAIN LEDGER COMPONENT WITH UPGRADED FILTERS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAIN LEDGER AND ON-PAGE FILTERS)
 # ============================================================================
 
 st.title("📋 Enterprise Attendance & Workforce Analytics Console")
-st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and active roster records.")
+st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
 
 # Load Raw Datasets from Synced Production Pools
 raw_attendance_data = fetch_raw_attendance_feed()
 master_emp_data = fetch_cntr_employee_master()
 
-# Compile Employee Profile Metadata Map (Key: employee_id)
+# Compile Employee Profile Metadata Map directly from cntr_employee_master
 emp_metadata_map = {}
 for emp in master_emp_data:
     emp_id = emp.get("employee_id")
@@ -64,6 +70,8 @@ for emp in master_emp_data:
             "start_date": emp.get("start_date") or "N/A",
             "last_day_of_work": emp.get("last_day_of_work") or "N/A",
             "employee_status": emp.get("employee_status") or "Active",
+            "comp_monthly": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00,
+            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
             "show_flag": emp.get("show", True)
         }
 
@@ -83,12 +91,33 @@ else:
         available_months_list.add(m_yr)
         emp_id_str = str(item.get("employee_id") or "").strip().upper()
         
-        meta = emp_metadata_map.get(emp_id_str, {"start_date": "N/A", "last_day_of_work": "N/A", "employee_status": "Active"})
+        meta = emp_metadata_map.get(emp_id_str, {
+            "start_date": "N/A", 
+            "last_day_of_work": "N/A", 
+            "employee_status": "Active",
+            "comp_monthly": 0.00,
+            "shift_hours": 12.00
+        })
         
         def safe_float(val):
             if val is None or str(val).strip() == "" or str(val).lower() == "none": return 0.00
             try: return float(val)
             except: return 0.00
+
+        total_hours_worked = safe_float(item.get("total_hours"))
+        total_days_worked = safe_float(item.get("total_days"))
+        
+        current_status = meta.get("employee_status", "Active")
+        configured_monthly_comp = meta.get("comp_monthly", 0.00)
+        configured_shift_hours = meta.get("shift_hours", 12.00)
+        
+        if current_status.upper() == "ACTIVE":
+            standard_monthly_days = 26.0
+            per_hour_rate = (configured_monthly_comp / standard_monthly_days) / configured_shift_hours
+            calculated_gross_payout = per_hour_rate * total_hours_worked
+        else:
+            per_hour_rate = 0.00
+            calculated_gross_payout = 0.00
 
         row_dict = {
             "Month_Year": m_yr,
@@ -96,11 +125,14 @@ else:
             "EMP_Name": item.get("employee_name") or "Unnamed",
             "Over_Time": safe_float(item.get("over_time")),
             "Less_Time": safe_float(item.get("less_time")),
-            "Total_Hours": safe_float(item.get("total_hours")),
-            "Total_Days": safe_float(item.get("total_days")),
+            "Total_Hours": total_hours_worked,
+            "Total_Days": total_days_worked,
             "Start_Date": meta.get("start_date", "N/A"),
             "Last_Date": meta.get("last_day_of_work", "N/A"),
-            "EMP_Status": meta.get("employee_status", "Active"),
+            "EMP_Status": current_status,
+            "Base_Monthly_Comp": configured_monthly_comp,
+            "Rate_Per_Hour": per_hour_rate,
+            "Gross_Payout": calculated_gross_payout,
             "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
         }
         
@@ -113,7 +145,6 @@ else:
 
     st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
     
-    # 🔍 INTEGRATED ON-PAGE MATRIX FILTERS (Four-Point Grid Expansion)
     mat_col1, mat_col2, mat_col3, mat_col4 = st.columns(4)
     with mat_col1:
         search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
@@ -125,14 +156,13 @@ else:
         search_mat_status = st.selectbox("Filter Ledger by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
         
     mat_col_slider = st.columns(1)
-    # ✔️ FIXED LAYOUT TRACKING: Direct index [0] targets single column container block explicitly to stop the TypeError
     with mat_col_slider[0]:
         start_day, end_day = st.slider(
             "Select Day Duration Truncation Range:",
             min_value=1, max_value=31, value=(1, 31), key="mat_day_slider"
         )
 
-    # Apply core layout row visibility filters
+    # Apply row visibility filters
     filtered_df = df[df["DB_Show_Flag"] == True]
     
     if search_mat_id:
@@ -146,18 +176,15 @@ else:
     elif search_mat_status == "In-Active Only":
         filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
 
-    # Generate truncated sliding day sequence headers dynamically based on slider selection
     selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
 
-    # Re-order final array fields matching layout constraints
     grid_columns_order = (
         ["Month_Year", "EMP_ID", "EMP_Name"] + 
         selected_day_cols + 
-        ["Over_Time", "Less_Time", "Total_Hours", "Total_Days", "Start_Date", "Last_Date", "EMP_Status"]
+        ["Over_Time", "Less_Time", "Total_Hours", "Total_Days", "Base_Monthly_Comp", "Rate_Per_Hour", "Gross_Payout", "Start_Date", "Last_Date", "EMP_Status"]
     )
-    filtered_df = filtered_df[grid_columns_order]
+    render_df = filtered_df[grid_columns_order]
 
-    # Render clean structural data table
     cfg = {
         "Month_Year": st.column_config.TextColumn("Month_Year", width="small"),
         "EMP_ID": st.column_config.TextColumn("EMP ID", width="small"),
@@ -166,69 +193,181 @@ else:
         "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small"),
         "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small"),
         "Total_Days": st.column_config.NumberColumn("Total Days", format="%.1f", width="small"),
+        "Base_Monthly_Comp": st.column_config.NumberColumn("Base Comp Rate", format="₹%.2f", width="small"),
+        "Rate_Per_Hour": st.column_config.NumberColumn("Hourly Rate", format="₹%.2f", width="small"),
+        "Gross_Payout": st.column_config.NumberColumn("Calculated Gross Payout", format="₹%.2f", width="medium"),
         "EMP_Status": st.column_config.TextColumn("EMP Status", width="small")
     }
     for d_col in selected_day_cols:
         cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45)
 
-    st.dataframe(filtered_df, hide_index=True, width="stretch", column_config=cfg)
+    st.dataframe(render_df, hide_index=True, width="stretch", column_config=cfg)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 OF 3 (ACTIVE WORKFORCE REGISTRY PANEL)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A (PDF COMPILER LAYOUT)
 # ============================================================================
 
-st.markdown("---")
-st.markdown("### 👥 Active Employee Master Registry Directory")
-st.markdown("View core operational metadata records and profile details imported directly from your human resources profiles.")
+    st.markdown("---")
+    st.markdown("### 🧾 Interactive Salary Slip Generator Window")
+    st.markdown("Select any worker profile from the list to compile a payslip.")
 
-if not master_emp_data:
-    st.warning("⚠️ Profile Link Alert: No workforce profile data entries located inside public.cntr_employee_master.")
-else:
-    # Build a clean dataframe specifically for your workforce roster profile sheets
-    master_rows_list = []
-    for emp in master_emp_data:
-        if emp.get("show") is False: continue # Filter out completely deleted accounts
+    if filtered_df.empty:
+        st.warning("⚠️ No rows currently match your filter selections.")
+    else:
+        employee_options = []
+        for idx, row in filtered_df.iterrows():
+            employee_options.append(f"{row['EMP_ID']} - {row['EMP_Name']} ({row['Month_Year']})")
+            
+        selected_emp_string = st.selectbox("Choose Profile:", options=employee_options)
         
-        master_rows_list.append({
-            "Roster_Status": emp.get("employee_status") or "Active",
-            "EMP_ID": emp.get("employee_id") or "N/A",
-            "Employee_Name": emp.get("employee_name") or "Unnamed",
-            "Shift_Hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
-            "Start_Onboarding_Date": emp.get("start_date") or "N/A",
-            "Last_Day_Worked": emp.get("last_day_of_work") or "N/A",
-            "Contact_Number": emp.get("contact") or "N/A",
-            "ID_Proof_Details": emp.get("id_proof") or "N/A",
-            "Monthly_Compensation": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00
-        })
-        
-    master_df = pd.DataFrame(master_rows_list)
+        if selected_emp_string:
+            selected_idx = employee_options.index(selected_emp_string)
+            emp_data = filtered_df.iloc[selected_idx]
+            
+            slip_col1, slip_col2 = st.columns(2)
+            with slip_col1:
+                st.markdown(f"**Employee ID & Name:** {emp_data['EMP_ID']} - {emp_data['EMP_Name']}")
+                st.markdown(f"**Pay Cycle Period:** {emp_data['Month_Year']}")
+                st.markdown(f"**Roster Profile Status:** {emp_data['EMP_Status']}")
+                st.markdown(f"**Total Days Worked:** {emp_data['Total_Days']:.1f} Days")
+            with slip_col2:
+                st.markdown(f"**Base Monthly Salary:** ₹ {emp_data['Base_Monthly_Comp']:,.2f}")
+                st.markdown(f"**Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr")
+                st.markdown(f"**Total Hours Logged:** {emp_data['Total_Hours']:.2f} Hours")
+                st.markdown(f"### **Net Payroll Payout:** ₹ {emp_data['Gross_Payout']:,.2f}")
+
+            def generate_salary_slip_pdf(data):
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+                story = []
+                
+                styles = getSampleStyleSheet()
+                title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=20, leading=24, textColor=colors.HexColor("#1A365D"), alignment=1)
+                sub_style = ParagraphStyle('SubStyle', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.gray, alignment=1)
+                heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontSize=12, leading=16, textColor=colors.HexColor("#2B6CB0"), spaceBefore=10, spaceAfter=10)
+                body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
+                
+                story.append(Paragraph("CLASSIC INDUSTRIES", title_style))
+                story.append(Paragraph("Automated Employee Monthly Payslip Statement", sub_style))
+                story.append(Spacer(1, 15))
+                
+                # 📐 GRID MATRIX CO-RELATION WIDTHS (130 points per cell footprint)
+                cw1 = [130, 130, 130, 130]
+                table_data = [
+                    [Paragraph("<b>Employee ID:</b>", body_style), Paragraph(str(data['EMP_ID']), body_style), Paragraph("<b>Pay Period:</b>", body_style), Paragraph(str(data['Month_Year']), body_style)],
+                    [Paragraph("<b>Employee Name:</b>", body_style), Paragraph(str(data['EMP_Name']), body_style), Paragraph("<b>Roster Status:</b>", body_style), Paragraph(str(data['EMP_Status']), body_style)],
+                    [Paragraph("<b>Onboarding Date:</b>", body_style), Paragraph(str(data['Start_Date']), body_style), Paragraph("<b>Last Day Worked:</b>", body_style), Paragraph(str(data['Last_Date']), body_style)],
+                ]
+                t1 = Table(table_data, colWidths=cw1)
+                t1.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F7FAFC")),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+                    ('PADDING', (0,0), (-1,-1), 8),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ]))
+                story.append(t1)
+                story.append(Spacer(1, 15))
+                
+                story.append(Paragraph("Earnings and Attendance Calculation Matrix Logs", heading_style))
+                
+                # 📐 GRID MATRIX CO-RELATION WIDTHS (Earnings grid spacing blocks)
+                cw2 = [220, 150, 150]
+                salary_data = [
+                    [Paragraph("<b>Description</b>", body_style), Paragraph("<b>Attendance Metric</b>", body_style), Paragraph("<b>Gross Payout</b>", body_style)],
+                    [Paragraph("Base Monthly Salary Rate", body_style), Paragraph("-", body_style), Paragraph(f"INR {data['Base_Monthly_Comp']:,.2f}", body_style)],
+                    [Paragraph("Calculated Hourly Processing Rate", body_style), Paragraph(f"INR {data['Rate_Per_Hour']:,.2f} / hr", body_style), Paragraph("-", body_style)],
+                    [Paragraph("Total Attended Days Logged", body_style), Paragraph(f"{data['Total_Days']:.1f} Days", body_style), Paragraph("-", body_style)],
+                    [Paragraph("Total Logged Productive Hours", body_style), Paragraph(f"{data['Total_Hours']:.2f} Hours", body_style), Paragraph("-", body_style)],
+                    [Paragraph("Extra Over_Time Balance Hours", body_style), Paragraph(f"{data['Over_Time']:.2f} Hours", body_style), Paragraph("-", body_style)],
+                    [Paragraph("Short Less_Time Balance Hours", body_style), Paragraph(f"{data['Less_Time']:.2f} Hours", body_style), Paragraph("-", body_style)],
+                    [Paragraph("<b>Net Monthly Payroll Payout</b>", body_style), Paragraph("-", body_style), Paragraph(f"<b>INR {data['Gross_Payout']:,.2f}</b>", body_style)],
+                ]
+                t2 = Table(salary_data, colWidths=cw2)
+                t2.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EDF2F7")),
+                    ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#E2E8F0")),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E0")),
+                    ('PADDING', (0,0), (-1,-1), 8),
+                    ('ALIGN', (2,0), (2,-1), 'RIGHT'),
+                ]))
+                story.append(t2)
+                story.append(Spacer(1, 40))
+                
+                cw3 = [260, 260]
+                sig_data = [
+                    [Paragraph("_____________________________<br/>Authorized Signatory Signature", body_style), Paragraph("_____________________________<br/>Employee Acknowledgment Signature", body_style)]
+                ]
+                t3 = Table(sig_data, colWidths=cw3)
+                t3.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
+                story.append(t3)
+                
+                doc.build(story)
+                buffer.seek(0)
+                return buffer.getvalue()
+
+            pdf_data = generate_salary_slip_pdf(emp_data)
+            
+            st.download_button(
+                label="📥 Generate & Download Salary Slip PDF",
+                data=pdf_data,
+                file_name=f"Salary_Slip_{emp_data['EMP_ID']}_{emp_data['Month_Year']}.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT B (MASTER REGISTRY DIRECTORY)
+# ============================================================================
+
+    # ============================================================================
+    # 👥 ACTIVE EMPLOYEE DIRECTORY REGISTRY MODULE
+    # ============================================================================
+    st.markdown("---")
+    st.markdown("### 👥 Active Employee Master Registry Directory")
     
-    # 🔍 INDEPENDENT WORKFORCE MASTER DIRECTORY FILTERS
-    dir_col1, dir_col2, dir_col3 = st.columns(3)
-    with dir_col1:
-        search_dir_id = st.text_input("Filter Directory by Employee ID:", "", key="dir_id_input").strip()
-    with dir_col2:
-        search_dir_name = st.text_input("Filter Directory by Employee Name:", "", key="dir_name_input").strip()
-    with dir_col3:
-        search_dir_status = st.selectbox("Filter Directory by Profile Status:", options=["All Profiles", "Active Only", "In-Active Only"], key="dir_status_input")
+    if not master_emp_data:
+        st.warning("⚠️ Profile Link Alert: No workforce data entries located inside public.cntr_employee_master.")
+    else:
+        master_rows_list = []
+        for emp in master_emp_data:
+            if emp.get("show") is False: continue
+            
+            master_rows_list.append({
+                "Roster_Status": emp.get("employee_status") or "Active",
+                "EMP_ID": emp.get("employee_id") or "N/A",
+                "Employee_Name": emp.get("employee_name") or "Unnamed",
+                "Shift_Hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
+                "Start_Onboarding_Date": emp.get("start_date") or "N/A",
+                "Last_Day_Worked": emp.get("last_day_of_work") or "N/A",
+                "Contact_Number": emp.get("contact") or "N/A",
+                "ID_Proof_Details": emp.get("id_proof") or "N/A",
+                "Monthly_Compensation": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00
+            })
+            
+        master_df = pd.DataFrame(master_rows_list)
         
-    # Execute Roster Directory layout filters array mutations
-    if search_dir_id:
-        master_df = master_df[master_df["EMP_ID"].astype(str).str.contains(search_dir_id, case=False, na=False)]
-    if search_dir_name:
-        master_df = master_df[master_df["Employee_Name"].astype(str).str.contains(search_dir_name, case=False, na=False)]
+        dir_col1, dir_col2, dir_col3 = st.columns(3)
+        with dir_col1:
+            search_dir_id = st.text_input("Filter Directory by Employee ID:", "", key="dir_id_input").strip()
+        with dir_col2:
+            search_dir_name = st.text_input("Filter Directory by Employee Name:", "", key="dir_name_input").strip()
+        with dir_col3:
+            search_dir_status = st.selectbox("Filter Directory by Profile Status:", options=["All Profiles", "Active Only", "In-Active Only"], key="dir_status_input")
+            
+        if search_dir_id:
+            master_df = master_df[master_df["EMP_ID"].astype(str).str.contains(search_dir_id, case=False, na=False)]
+        if search_dir_name:
+            master_df = master_df[master_df["Employee_Name"].astype(str).str.contains(search_dir_name, case=False, na=False)]
+            
+        if search_dir_status == "Active Only":
+            master_df = master_df[master_df["Roster_Status"].str.upper() == "ACTIVE"]
+        elif search_dir_status == "In-Active Only":
+            master_df = master_df[master_df["Roster_Status"].str.upper() == "IN-ACTIVE"]
+            
+        dir_cfg = {
+            "Roster_Status": st.column_config.TextColumn("Roster Status", width="small"),
+            "EMP_ID": st.column_config.TextColumn("EMP ID", width="small"),
+            "Employee_Name": st.column_config.TextColumn("Employee Name", width="medium"),
+            "Shift_Hours": st.column_config.NumberColumn("Scheduled Shift (Hrs)", format="%.2f", width="small"),
+            "Monthly_Compensation": st.column_config.NumberColumn("Compensation", format="₹%.2f", width="small")
+        }
         
-    if search_dir_status == "Active Only":
-        master_df = master_df[master_df["Roster_Status"].str.upper() == "ACTIVE"]
-    elif search_dir_status == "In-Active Only":
-        master_df = master_df[master_df["Roster_Status"].str.upper() == "IN-ACTIVE"]
-        
-    # Display the directory spreadsheet container panel layout
-    dir_cfg = {
-        "Roster_Status": st.column_config.TextColumn("Roster Status", width="small"),
-        "EMP_ID": st.column_config.TextColumn("EMP ID", width="small"),
-        "Employee_Name": st.column_config.TextColumn("Employee Name", width="medium"),
-        "Shift_Hours": st.column_config.NumberColumn("Scheduled Shift (Hrs)", format="%.2f", width="small"),
-        "Monthly_Compensation": st.column_config.NumberColumn("Compensation", format="₹%.2f", width="small")
-    }
-    
-    st.dataframe(master_df, hide_index=True, width="stretch", column_config=dir_cfg)
+        st.dataframe(master_df, hide_index=True, width="stretch", column_config=dir_cfg)
