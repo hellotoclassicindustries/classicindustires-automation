@@ -1,11 +1,14 @@
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (ENDPOINTS & DATA POOLS)
+# ============================================================================
+
 import streamlit as st
 import pandas as pd
 import requests
 import datetime
+import json
 
-# ============================================================================
-# ⚙️ SECURE ENDPOINT CREDENTIALS ROUTING
-# ============================================================================
+# 🛰️ Secure Secret Credentials Resolution Routing
 SUPABASE_URL = st.secrets.get("SUPABASE_BASE_URL", "https://supabase.co")
 SUPABASE_KEY = st.secrets.get("SUPABASE_ANON_KEY", "YOUR_ANON_KEY")
 HEADERS = {
@@ -15,141 +18,195 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5) # 5-second responsive cache for rapid sync turnaround loops
 def fetch_raw_attendance_feed():
-    """Fetches verified matrix inputs out of public.raw_attendance_feed"""
-    endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?show=eq.true&order=month_year.desc,employee_id.asc"
+    """Fetches full comprehensive staging matrix feed without show filters"""
+    endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
     try:
-        res = requests.get(endpoint, headers=HEADERS)
-        return res.json() if res.status_code == 200 else []
+        response = requests.get(endpoint, headers=HEADERS)
+        if response.status_code == 200:
+            return response.json()
+        return []
     except Exception:
         return []
 
 @st.cache_data(ttl=60)
 def fetch_cntr_employee_master():
-    """Queries profile registry out of public.cntr_employee_master"""
+    """Queries production employee metadata profile registries"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master?show=eq.true"
     try:
-        res = requests.get(endpoint, headers=HEADERS)
-        return res.json() if res.status_code == 200 else []
+        response = requests.get(endpoint, headers=HEADERS)
+        if response.status_code == 200:
+            return response.json()
+        return []
     except Exception:
         return []
 
-def execute_database_row_patch(record_id, decision_token):
-    """Commits supervisor processing updates directly to Supabase"""
+def execute_database_row_patch(record_id, verification_decision):
+    """Commits supervisor processing rule changes to Supabase"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?id=eq.{record_id}"
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    payload = {
-        "show": False,
-        "sync_status": f"flagged to delete + {ts}"
-    } if decision_token == "Del" else {
-        "sync_status": f"Success ✅ ({ts})"
-    }
+    if verification_decision == "Del":
+        payload = {
+            "show": False,
+            "sync_status": f"flagged to delete + {timestamp}"
+        }
+    else:
+        payload = {
+            "show": True, # Restores grid visibility cleanly if flipped back to Yes
+            "sync_status": f"Success ✅ ({timestamp})"
+        }
+        
     try:
         response = requests.patch(endpoint, headers=HEADERS, json=payload)
         return response.status_code in [200, 201, 204]
     except Exception:
         return False
-
 # ============================================================================
-# 🖥️ CORE STREAMLIT USER INTERFACE LAYOUT (COMPACT METRICS SPECIFICATION)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAPPING & FILTERS)
 # ============================================================================
-st.title("📋 Employee Attendance Ledger")
-st.markdown("Filter, verify, and monitor rolling month-wise employee shift parameters.")
 
-# Initialize background data connections
-raw_feed = fetch_raw_attendance_feed()
-master_profiles = fetch_cntr_employee_master()
+# Interface Layout Root Initialization
+st.title("📋 Enterprise Attendance Ledger Dashboard")
+st.markdown("Filter, track, verify, and monitor rolling month-wise employee shift parameters using live production profile streams.")
 
-# Map employee profile metrics cleanly (Key: employee_id)
-meta_map = {}
-for emp in master_profiles:
-    eid = emp.get("employee_id")
-    if eid:
-        meta_map[str(eid).strip()] = {
-            "start": emp.get("start_date", "N/A"),
-            "last": emp.get("last_day_of_work", "N/A"),
-            "status": emp.get("employee_status", "Active"),
+# Load Datasets from Supabase Production Pools
+raw_attendance_data = fetch_raw_attendance_feed()
+master_emp_data = fetch_cntr_employee_master()
+
+# Build fast metadata lookups from master profiles
+emp_metadata_map = {}
+for emp in master_emp_data:
+    emp_id = emp.get("employee_id")
+    if emp_id:
+        emp_metadata_map[str(emp_id).strip()] = {
+            "start_date": emp.get("start_date", "N/A"),
+            "last_day_of_work": emp.get("last_day_of_work", "N/A"),
+            "employee_status": emp.get("employee_status", "Active"),
             "contact": emp.get("contact", "N/A")
         }
 
-if not raw_feed:
-    st.info("📋 Staging Queue Is Empty: No verified rows are pending check processes.")
+if not raw_attendance_data:
+    st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
     processed_rows = []
-    months_set = set()
+    available_months_list = set()
     
-    for item in raw_feed:
-        days = item.get("attendance_days", [])
+    for item in raw_attendance_data:
+        days_list = item.get("attendance_days") or item.get("attendance_records") or item.get("days") or []
+        
+        # Safely sanitize and unpack stringified array elements if needed
+        if isinstance(days_list, str):
+            try:
+                days_list = json.loads(days_list)
+            except:
+                days_list = []
+                
         m_yr = item.get("month_year", "N/A")
-        months_set.add(m_yr)
-        emp_id = str(item.get("employee_id", "")).strip()
+        available_months_list.add(m_yr)
+        emp_id_str = str(item.get("employee_id", "")).strip()
         
-        # Intercept metadata configurations from cntr_employee_master dynamically
-        m_data = meta_map.get(emp_id, {"start": "N/A", "last": "N/A", "status": "Active", "contact": "N/A"})
+        meta = emp_metadata_map.get(emp_id_str, {"start_date": "N/A", "last_day_of_work": "N/A", "employee_status": "Active", "contact": "N/A"})
         
-        row = {
-            "Action": "Review",
+        row_dict = {
+            "Action_Gate": "Review",
             "Month_Year": m_yr,
             "EMP_ID": item.get("employee_id"),
             "EMP_Name": item.get("employee_name"),
-            "Over_Time": float(item.get("over_time")) if item.get("over_time") else 0.0,
-            "Less_Time": float(item.get("less_time")) if item.get("less_time") else 0.0,
-            "Total_Hours": float(item.get("total_hours")) if item.get("total_hours") else 0.0,
-            "Total_Days": float(item.get("total_days")) if item.get("total_days") else 0.0,
-            "Start_Date": m_data["start"],
-            "Last_Date": m_data["last"],
-            "Status": m_data["status"],
-            "Contact": m_data["contact"],
-            "File": item.get("source_filename"),
-            "ID": item.get("id")
+            "Over_Time": float(item.get("over_time")) if item.get("over_time") else 0.00,
+            "Less_Time": float(item.get("less_time")) if item.get("less_time") else 0.00,
+            "Total_Hours": float(item.get("total_hours")) if item.get("total_hours") else 0.00,
+            "Total_Days": float(item.get("total_days")) if item.get("total_days") else 0.00,
+            "Start_Date": meta["start_date"],
+            "Last_Date": meta["last_day_of_work"],
+            "EMP_Status": meta["employee_status"],
+            "Contact_Info": meta["contact"],
+            "File_Origin": item.get("source_filename"),
+            "DB_ID": item.get("id"),
+            "DB_Show_Flag": item.get("show", True)
         }
         
-        for d in range(1, 32):
-            row[f"D{d:02d}"] = days[d-1] if d-1 < len(days) else ""
+        for day in range(1, 32):
+            row_dict[f"D{day:02d}"] = days_list[day-1] if (days_list and day-1 < len(days_list)) else ""
             
-        processed_rows.append(row)
+        processed_rows.append(row_dict)
         
-    base_df = pd.DataFrame(processed_rows)
+    df = pd.DataFrame(processed_rows)
 
     # ============================================================================
-    # 🎛️ SIDEBAR PARAMETERS FILTER MODULES
+    # 🎛️ CONTROL PANEL FILTERS INTERFACE SECTION
     # ============================================================================
     st.sidebar.header("🔍 Filter Parameters")
-    selected_months = st.sidebar.multiselect("Time Frame:", options=sorted(list(months_set)), default=sorted(list(months_set)))
-    search_id = st.sidebar.text_input("Search Employee ID:", "").strip()
-    search_name = st.sidebar.text_input("Search Employee Name:", "").strip()
     
-    # Filter array sweeps matching sidebar conditions
-    f_df = base_df[base_df["Month_Year"].isin(selected_months)]
-    if search_id:
-        f_df = f_df[f_df["EMP_ID"].astype(str).str.contains(search_id, case=False, na=False)]
-    if search_name:
-        f_df = f_df[f_df["EMP_Name"].astype(str).str.contains(search_name, case=False, na=False)]
-
-    # ============================================================================
-    # 📈 COMPACT EXECUTIVE KPI BANNER PANEL
-    # ============================================================================
-    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-    m_col1.metric("Total Days Logged", f"{f_df['Total_Days'].sum():.1f} Days")
-    m_col2.metric("Productive Hours", f"{f_df['Total_Hours'].sum():.2f} Hrs")
-    m_col3.metric("Over_Time Sum", f"{f_df['Over_Time'].sum():.2f} Hrs")
-    m_col4.metric("Less_Time Sum", f"{f_df['Less_Time'].sum():.2f} Hrs")
-
-    # ============================================================================
-    # 🖥️ VERIFIED DATA GRID DESIGN PATH (COMPACT COLUMN CONFIGURATIONS)
-    # ============================================================================
-    col_order = (
-        ["Action", "Month_Year", "EMP_ID", "EMP_Name"] + 
-        [f"D{d:02d}" for d in range(1, 32)] + 
-        ["Over_Time", "Less_Time", "Total_Hours", "Total_Days", "Start_Date", "Last_Date", "Status", "Contact", "File", "ID"]
+    # Toggle to dynamically switch data views matching show=false properties
+    view_mode = st.sidebar.selectbox(
+        "Select Dataset Visibility Mode:",
+        options=["Show Active Records Only (show = true)", "Show Removed Records Only (show = false)", "Show All Records (Combined)"]
     )
-    f_df = f_df[col_order]
     
-    # Setup cell width restrictions to prevent horizontal table breaks
+    selected_months = st.sidebar.multiselect(
+        "Select Time Frame (Month_Year):",
+        options=sorted(list(available_months_list)),
+        default=sorted(list(available_months_list))
+    )
+    
+    search_emp_id = st.sidebar.text_input("Search Employee ID:", "").strip()
+    search_emp_name = st.sidebar.text_input("Search Employee Name:", "").strip()
+    
+    # Process View-Mode Filters
+    if view_mode == "Show Active Records Only (show = true)":
+        filtered_df = df[df["DB_Show_Flag"] == True]
+    elif view_mode == "Show Removed Records Only (show = false)":
+        filtered_df = df[df["DB_Show_Flag"] == False]
+    else:
+        filtered_df = df.copy()
+        
+    # Execute structural row-mask filter matches
+    filtered_df = filtered_df[filtered_df["Month_Year"].isin(selected_months)]
+    if search_emp_id:
+        filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_emp_id, case=False, na=False)]
+    if search_emp_name:
+        filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_emp_name, case=False, na=False)]
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 OF 3 (METRICS & INTERACTIVE LEDGER)
+# ============================================================================
+
+    # ============================================================================
+    # 📊 EXECUTIVE KPI SCOPE INFOGRAPHIC REVEAL
+    # ============================================================================
+    st.markdown("### 📈 Filtered Workspace Summary Metrics")
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    
+    with metric_col1:
+        st.metric("Total Days Logged", f"{filtered_df['Total_Days'].sum():.1f} Days")
+    with metric_col2:
+        st.metric("Total Productive Hours", f"{filtered_df['Total_Hours'].sum():.2f} Hrs")
+    with metric_col3:
+        st.metric("Accumulated Over_Time", f"{filtered_df['Over_Time'].sum():.2f} Hrs")
+    with metric_col4:
+        st.metric("Accumulated Less_Time", f"{filtered_df['Less_Time'].sum():.2f} Hrs")
+
+    # ============================================================================
+    # 📋 ATTENDANCE FORMAT DATAGRID EDIT PANEL
+    # ============================================================================
+    st.markdown("### 🖥️ Main Interactive Attendance Ledger")
+    st.caption("Double-click Action Selection cell properties to verify rows ('Yes' / 'Del') directly to database tables.")
+
+    # Re-order array layers into standard attendance grid view layout matching clean styles
+    grid_columns_order = (
+        ["Action_Gate", "Month_Year", "EMP_ID", "EMP_Name"] + 
+        [f"D{d:02d}" for d in range(1, 32)] + 
+        ["Over_Time", "Less_Time", "Total_Hours", "Total_Days", "Start_Date", "Last_Date", "EMP_Status", "Contact_Info", "File_Origin", "DB_ID"]
+    )
+    filtered_df = filtered_df[grid_columns_order]
+
+    # Disable all fields except Action Selection column to maintain mathematical integrity
+    columns_to_disable = [c for c in grid_columns_order if c != "Action_Gate"]
+
+    # Setup cell width restrictions to prevent horizontal table text explosions
     cfg = {
-        "Action": st.column_config.SelectboxColumn("Action", options=["Review", "Yes", "Del"], required=True, width="small"),
+        "Action_Gate": st.column_config.SelectboxColumn("Action", options=["Review", "Yes", "Del"], required=True, width="small"),
         "Month_Year": st.column_config.TextColumn("Month_Year", width="small"),
         "EMP_ID": st.column_config.TextColumn("EMP ID", width="small"),
         "EMP_Name": st.column_config.TextColumn("Employee Name", width="medium"),
@@ -157,38 +214,39 @@ else:
         "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small"),
         "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small"),
         "Total_Days": st.column_config.NumberColumn("Total Days", format="%.1f", width="small"),
-        "ID": st.column_config.NumberColumn("DB ID", format="%d", width="small")
+        "DB_ID": st.column_config.NumberColumn("DB ID", format="%d", width="small")
     }
     
-    # Enforce strict 50-pixel width cell boxes down calendar columns D01-D31
+    # Enforce clear uniform width for the 31 calendar columns
     for day_idx in range(1, 32):
         cfg[f"D{day_idx:02d}"] = st.column_config.TextColumn(f"{day_idx:02d}", width=50)
 
-    disabled_cols = [c for c in col_order if c != "Action"]
-
     edited_df = st.data_editor(
-        f_df,
+        filtered_df,
         hide_index=True,
-        disabled=disabled_cols,
+        disabled=columns_to_disable,
         use_container_width=True,
         column_config=cfg
     )
 
     # ============================================================================
-    # 💾 BATCH SUBMIT PROCESSING QUEUE COMMAND RULES
+    # 💾 BATCH DECISION COMMITS TRIGGER BLOCK
     # ============================================================================
     if st.button("💾 Commit Ledger Updates & Sync To Supabase", type="primary"):
-        saves = 0
-        for _, r in edited_df.iterrows():
-            act = r["Action"]
-            db_id = r["ID"]
-            if act in ["Yes", "Del"]:
-                if execute_database_row_patch(db_id, act):
-                    saves += 1
+        save_counter = 0
+        
+        for index, row in edited_df.iterrows():
+            selected_action = row["Action_Gate"]
+            record_db_id = row["DB_ID"]
+            
+            if selected_action in ["Yes", "Del"]:
+                success = execute_database_row_patch(record_db_id, selected_action)
+                if success:
+                    save_counter += 1
                     
-        if saves > 0:
-            st.success(f"🎉 Successfully synchronized {saves} attendance rows directly inside Supabase!")
-            st.cache_data.clear()
+        if save_counter > 0:
+            st.success(f"🎉 Successfully synchronized {save_counter} attendance rows changes directly into Supabase tables!")
+            st.cache_data.clear() # Evict temporary memory footprints
             st.rerun()
         else:
-            st.warning("📋 No updates detected. Switch specific row Actions to 'Yes' or 'Del' before clicking commit.")
+            st.warning("📋 No updates detected. Switch specific row Action Selections to 'Yes' or 'Del' before saving.")
