@@ -23,10 +23,11 @@ ledger_page = st.Page("views/3_Daily_Ledger.py", title="Daily Transaction Regist
 forecast_page = st.Page("views/5_Forecast_Simulation.py", title="Forecast Simulation View", icon="🔮")
 guide_page = st.Page("views/4_System_Guide.py", title="System User Guide", icon="📘")
 page_invoice = st.Page("views/6_Invoice_Generator.py", title="Invoice Generator Node", icon="🧾")
+attendance_ledger= st.Page("views/7_attendance_ledger.py", title="Attendance Ledger Dashboard", icon="📋")
 
 
 # TRUTH PATTERN: Register all pages cleanly in the navigation loop
-pages = [about_page, stock_page, ledger_page, forecast_page, page_invoice, guide_page]
+pages = [about_page, stock_page, ledger_page, forecast_page, page_invoice,attendance_ledger, guide_page]
 
 # Run Core Navigation Controller
 pg = st.navigation(pages)
@@ -62,7 +63,7 @@ with st.sidebar:
                     st.error("Invalid corporate credentials.")
 
 # 🔒 RECONCILIATION GATEKEEPER: Added forecast_page to the secure gate group
-if not st.session_state.authenticated and pg in [stock_page, ledger_page, forecast_page, guide_page,page_invoice]:
+if not st.session_state.authenticated and pg in [stock_page, ledger_page, forecast_page, guide_page, attendance_ledger, page_invoice]:
     st.title("🔒 Restricted Corporate Node")
     st.error("Access Denied. This terminal view contains confidential operational ledger values.")
     st.info("💡 Please look at the lower left section of your sidebar menu and input your authorized staff password credentials to unlock this view node.")
