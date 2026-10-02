@@ -45,7 +45,7 @@ def fetch_cntr_employee_master():
     except Exception:
         return []
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAIN LEDGER COMPONENT WITH ON-PAGE FILTERS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAIN LEDGER COMPONENT WITH UPGRADED FILTERS)
 # ============================================================================
 
 st.title("📋 Enterprise Attendance & Workforce Analytics Console")
@@ -113,16 +113,19 @@ else:
 
     st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
     
-    # 🔍 INTEGRATED ON-PAGE MATRIX FILTERS (Matching Employee Registry style layout)
-    mat_col1, mat_col2, mat_col3 = st.columns(3)
+    # 🔍 INTEGRATED ON-PAGE MATRIX FILTERS (Four-Point Grid Expansion)
+    mat_col1, mat_col2, mat_col3, mat_col4 = st.columns(4)
     with mat_col1:
         search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
     with mat_col2:
         search_mat_name = st.text_input("Filter Ledger by Employee Name:", "", key="mat_name_input").strip()
     with mat_col3:
         search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + sorted(list(available_months_list)), key="mat_month_input")
+    with mat_col4:
+        # 🆕 ADDED: EMP_Status dropdown filter parameter applied directly to the Main Attendance Matrix Grid
+        search_mat_status = st.selectbox("Filter Ledger by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
         
-    mat_col_slider = st.columns(1)[0]
+    mat_col_slider = st.columns(1)
     with mat_col_slider:
         start_day, end_day = st.slider(
             "Select Day Duration Truncation Range:",
@@ -138,6 +141,10 @@ else:
         filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_mat_name, case=False, na=False)]
     if search_mat_month != "All Months":
         filtered_df = filtered_df[filtered_df["Month_Year"] == search_mat_month]
+    if search_mat_status == "Active Only":
+        filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "ACTIVE"]
+    elif search_mat_status == "In-Active Only":
+        filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
 
     # Generate truncated sliding day sequence headers dynamically based on slider selection
     selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
@@ -158,7 +165,8 @@ else:
         "Over_Time": st.column_config.NumberColumn("Extra Hrs", format="%.2f", width="small"),
         "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small"),
         "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small"),
-        "Total_Days": st.column_config.NumberColumn("Total Days", format="%.1f", width="small")
+        "Total_Days": st.column_config.NumberColumn("Total Days", format="%.1f", width="small"),
+        "EMP_Status": st.column_config.TextColumn("EMP Status", width="small")
     }
     for d_col in selected_day_cols:
         cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45)
