@@ -301,26 +301,47 @@ else:
                 st.markdown(f"**Recalculated Hours Logged:** {emp_data['Total_Hours']:.2f} Hours")
                 st.markdown(f"### **Net Payroll Payout:** ₹ {emp_data['Gross_Payout']:,.2f}")
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A3 (PDF INGESTION CORE)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A3 (PDF COMPILER ENGINE)
 # ============================================================================
 
             # Professional PDF compilation engine
             def generate_salary_slip_pdf(data, s_day, e_day):
                 buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+                doc = SimpleDocTemplate(
+                    buffer, pagesize=letter, 
+                    rightMargin=40, leftMargin=40, 
+                    topMargin=40, bottomMargin=40
+                )
                 story = []
                 
                 styles = getSampleStyleSheet()
-                title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=20, leading=24, textColor=colors.HexColor("#1A365D"), alignment=1)
-                sub_style = ParagraphStyle('SubStyle', parent=styles['Normal'], fontSize=10, leading=14, textColor=colors.gray, alignment=1)
-                heading_style = ParagraphStyle('HeadingStyle', parent=styles['Heading2'], fontSize=12, leading=16, textColor=colors.HexColor("#2B6CB0"), spaceBefore=10, spaceAfter=10)
-                body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
+                title_style = ParagraphStyle(
+                    'TitleStyle', parent=styles['Heading1'], 
+                    fontSize=20, leading=24, 
+                    textColor=colors.HexColor("#1A365D"), alignment=1
+                )
+                sub_style = ParagraphStyle(
+                    'SubStyle', parent=styles['Normal'], 
+                    fontSize=10, leading=14, 
+                    textColor=colors.gray, alignment=1
+                )
+                heading_style = ParagraphStyle(
+                    'HeadingStyle', parent=styles['Heading2'], 
+                    fontSize=12, leading=16, 
+                    textColor=colors.HexColor("#2B6CB0"), 
+                    spaceBefore=10, spaceAfter=10
+                )
+                body_style = ParagraphStyle(
+                    'BodyStyle', parent=styles['Normal'], 
+                    fontSize=10, leading=14
+                )
                 
                 story.append(Paragraph("CLASSIC INDUSTRIES", title_style))
                 story.append(Paragraph("Automated Employee Monthly Payslip Statement", sub_style))
                 story.append(Spacer(1, 15))
                 
-                cw1 =
+                # ✔️ FIXED LAYOUT ARRAY BOUNDS: Locked explicit 132-point boundaries per grid column
+                cw1 = [132, 132, 132, 132]
                 table_data = [
                     [Paragraph("<b>Employee ID:</b>", body_style), Paragraph(str(data['EMP_ID']), body_style), Paragraph("<b>Pay Period:</b>", body_style), Paragraph(str(data['Month_Year']), body_style)],
                     [Paragraph("<b>Employee Name:</b>", body_style), Paragraph(str(data['EMP_Name']), body_style), Paragraph("<b>Roster Status:</b>", body_style), Paragraph(str(data['EMP_Status']), body_style)],
@@ -338,7 +359,8 @@ else:
                 
                 story.append(Paragraph("Earnings and Attendance Calculation Matrix Logs", heading_style))
                 
-                cw2 =
+                # ✔️ FIXED LAYOUT ARRAY BOUNDS: Locked explicit width distributions across payroll logs
+                cw2 = [240, 140, 148]
                 salary_data = [
                     [Paragraph("<b>Description</b>", body_style), Paragraph("<b>Metric Value</b>", body_style), Paragraph("<b>Calculated Gross Payout</b>", body_style)],
                     [Paragraph("Base Monthly Salary Rate", body_style), Paragraph("-", body_style), Paragraph(f"INR {data['Base_Monthly_Comp']:,.2f}", body_style)],
@@ -360,7 +382,8 @@ else:
                 story.append(t2)
                 story.append(Spacer(1, 40))
                 
-                cw3 =
+                # ✔️ FIXED LAYOUT ARRAY BOUNDS: Locked signature block dimensions evenly
+                cw3 = [264, 264]
                 sig_data = [
                     [Paragraph("_____________________________<br/>Authorized Signatory Signature", body_style), Paragraph("_____________________________<br/>Employee Acknowledgment Signature", body_style)]
                 ]
