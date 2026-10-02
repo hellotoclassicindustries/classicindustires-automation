@@ -1,5 +1,5 @@
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (ENDPOINTS & UNRESTRICTED POOLS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (EXPLICIT ENVIRONMENT KEY ALIGNMENT)
 # ============================================================================
 
 import streamlit as st
@@ -8,9 +8,14 @@ import requests
 import datetime
 import json
 
-# 🛰️ Secure Secret Credentials Resolution Routing
-SUPABASE_URL = st.secrets.get("SUPABASE_BASE_URL", "https://supabase.co")
-SUPABASE_KEY = st.secrets.get("SUPABASE_ANON_KEY", "YOUR_ANON_KEY")
+# 🛰️ STRICT SECRETS RESOLUTION: Aligned explicitly with your sample infrastructure config
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+except Exception as e:
+    st.error("❌ Missing Infrastructure Secrets Configuration inside Streamlit Dashboard settings.")
+    st.stop()
+
 HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -18,9 +23,9 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
-@st.cache_data(ttl=2) # 2-second responsive cache for rapid sync turnaround loops
+@st.cache_data(ttl=2) # 2-second lightning cache gives near-instant sync visibility
 def fetch_raw_attendance_feed():
-    """Fetches full attendance matrix from Supabase without restrictive filters"""
+    """Fetches full attendance matrix from Supabase public.raw_attendance_feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -30,9 +35,9 @@ def fetch_raw_attendance_feed():
     except Exception:
         return []
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def fetch_cntr_employee_master():
-    """Queries production employee metadata profile registries"""
+    """Queries production employee metadata profile registries out of public.cntr_employee_master"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -60,12 +65,11 @@ def execute_database_row_patch(record_id, verification_decision):
         
     try:
         response = requests.patch(endpoint, headers=HEADERS, json=payload)
-        # ✔️ PRODUCTION REPAIR FIXED: Restored complete status list verification criteria
         return response.status_code in [200, 201, 204]
     except Exception:
         return False
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAPPING & FILTERS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (ROBUST DATA DICTIONARY BUILDER)
 # ============================================================================
 
 # Interface Layout Header Initialization
@@ -81,15 +85,15 @@ emp_metadata_map = {}
 for emp in master_emp_data:
     emp_id = emp.get("employee_id")
     if emp_id:
-        emp_metadata_map[str(emp_id).strip()] = {
-            "start_date": emp.get("start_date", "N/A"),
-            "last_day_of_work": emp.get("last_day_of_work", "N/A"),
-            "employee_status": emp.get("employee_status", "Active"),
-            "contact": emp.get("contact", "N/A")
+        emp_metadata_map[str(emp_id).strip().upper()] = {
+            "start_date": emp.get("start_date") or "N/A",
+            "last_day_of_work": emp.get("last_day_of_work") or "N/A",
+            "employee_status": emp.get("employee_status") or "Active",
+            "contact": emp.get("contact") or "N/A"
         }
 
 if not raw_attendance_data:
-    st.info("📋 System Log: No data rows found inside public.raw_attendance_feed table space.")
+    st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
     processed_rows = []
     available_months_list = set()
@@ -104,16 +108,21 @@ else:
             except:
                 days_list = []
                 
-        m_yr = item.get("month_year", "N/A")
+        m_yr = item.get("month_year") or "N/A"
         available_months_list.add(m_yr)
-        emp_id_str = str(item.get("employee_id", "")).strip()
+        emp_id_str = str(item.get("employee_id") or "").strip().upper()
         
-        # Link metadata profiles from cntr_employee_master table space dynamically
-        meta = emp_metadata_map.get(emp_id_str, {"start_date": "N/A", "last_day_of_work": "N/A", "employee_status": "Active", "contact": "N/A"})
+        # Relational Profile Guardian: Ensures rows map even if data lacks a master entry
+        meta = emp_metadata_map.get(emp_id_str, {
+            "start_date": "N/A", 
+            "last_day_of_work": "N/A", 
+            "employee_status": "Active", 
+            "contact": "N/A"
+        })
         
-        # Dynamic float parser intercepts empty string values gracefully
+        # Dynamic float parser intercepts empty or string fields gracefully
         def safe_float(val):
-            if val is None or str(val).strip() == "":
+            if val is None or str(val).strip() == "" or str(val).lower() == "none":
                 return 0.00
             try:
                 return float(val)
@@ -123,17 +132,17 @@ else:
         row_dict = {
             "Action_Gate": "Review",
             "Month_Year": m_yr,
-            "EMP_ID": item.get("employee_id"),
-            "EMP_Name": item.get("employee_name"),
+            "EMP_ID": item.get("employee_id") or "N/A",
+            "EMP_Name": item.get("employee_name") or "Unnamed",
             "Over_Time": safe_float(item.get("over_time")),
             "Less_Time": safe_float(item.get("less_time")),
             "Total_Hours": safe_float(item.get("total_hours")),
             "Total_Days": safe_float(item.get("total_days")),
-            "Start_Date": meta["start_date"],
-            "Last_Date": meta["last_day_of_work"],
-            "EMP_Status": meta["employee_status"],
-            "Contact_Info": meta["contact"],
-            "File_Origin": item.get("source_filename"),
+            "Start_Date": meta.get("start_date", "N/A"),
+            "Last_Date": meta.get("last_day_of_work", "N/A"),
+            "EMP_Status": meta.get("employee_status", "Active"),
+            "Contact_Info": meta.get("contact", "N/A"),
+            "File_Origin": item.get("source_filename") or "Manual",
             "DB_ID": item.get("id"),
             "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
         }
@@ -152,7 +161,6 @@ else:
     # ============================================================================
     st.sidebar.header("🔍 Filter Parameters")
     
-    # Toggle switch options to filter across your custom database status criteria
     view_mode = st.sidebar.selectbox(
         "Select Dataset Visibility Mode:",
         options=["Show Active Records Only (show = true)", "Show Removed Records Only (show = false)", "Show All Records (Combined)"]
@@ -176,14 +184,15 @@ else:
         filtered_df = df.copy()
         
     # Apply Time Frame and Text Filters
-    filtered_df = filtered_df[filtered_df["Month_Year"].isin(selected_months)]
+    if len(selected_months) > 0:
+        filtered_df = filtered_df[filtered_df["Month_Year"].isin(selected_months)]
     
     if search_emp_id:
         filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_emp_id, case=False, na=False)]
     if search_emp_name:
         filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_emp_name, case=False, na=False)]
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 OF 3 (METRICS & FUTURE-PROOF LEDGER)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 OF 3 (METRICS & STRETCH LEDGER)
 # ============================================================================
 
     # ============================================================================
@@ -213,9 +222,13 @@ else:
         [f"D{d:02d}" for d in range(1, 32)] + 
         ["Over_Time", "Less_Time", "Total_Hours", "Total_Days", "Start_Date", "Last_Date", "EMP_Status", "Contact_Info", "File_Origin", "DB_ID"]
     )
+    
+    # Ensure columns exist before subsetting dataframe
+    for col in grid_columns_order:
+        if col not in filtered_df.columns:
+            filtered_df[col] = "N/A"
+            
     filtered_df = filtered_df[grid_columns_order]
-
-    # Disable all fields except Action Selection column to maintain mathematical integrity
     columns_to_disable = [c for c in grid_columns_order if c != "Action_Gate"]
 
     # Setup cell width restrictions to prevent horizontal table text explosions
