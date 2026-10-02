@@ -169,7 +169,7 @@ else:
     if search_emp_name:
         filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_emp_name, case=False, na=False)]
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 OF 3 (METRICS & INTERACTIVE LEDGER)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 OF 3 (METRICS & FUTURE-PROOF LEDGER)
 # ============================================================================
 
     # ============================================================================
@@ -221,11 +221,12 @@ else:
     for day_idx in range(1, 32):
         cfg[f"D{day_idx:02d}"] = st.column_config.TextColumn(f"{day_idx:02d}", width=50)
 
+    # ✔️ DEPRECATION REPAIR FIXED: Replaced use_container_width with future-proof stretch parameters
     edited_df = st.data_editor(
         filtered_df,
         hide_index=True,
         disabled=columns_to_disable,
-        use_container_width=True,
+        width="stretch",
         column_config=cfg
     )
 
