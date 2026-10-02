@@ -1,5 +1,5 @@
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (ENDPOINTS & DATA POOLS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (ENDPOINTS & UNRESTRICTED POOLS)
 # ============================================================================
 
 import streamlit as st
@@ -18,9 +18,9 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
-@st.cache_data(ttl=2) # 2-second lightning cache for instant reflection responses
+@st.cache_data(ttl=2) # 2-second responsive cache for rapid sync turnaround loops
 def fetch_raw_attendance_feed():
-    """Fetches full staging matrix records directly from Supabase feed"""
+    """Fetches full attendance matrix from Supabase without restrictive filters"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -32,7 +32,7 @@ def fetch_raw_attendance_feed():
 
 @st.cache_data(ttl=60)
 def fetch_cntr_employee_master():
-    """Queries master employee records ledger table space"""
+    """Queries production employee metadata profile registries"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -43,7 +43,7 @@ def fetch_cntr_employee_master():
         return []
 
 def execute_database_row_patch(record_id, verification_decision):
-    """Commits supervisor processing updates directly to Supabase"""
+    """Updates verification choices and dynamic timestamps on the remote table"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?id=eq.{record_id}"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -60,7 +60,7 @@ def execute_database_row_patch(record_id, verification_decision):
         
     try:
         response = requests.patch(endpoint, headers=HEADERS, json=payload)
-        # ✔️ FIXED SYNTAX ERADICATION: Corrected status code comparison evaluation
+        # ✔️ PRODUCTION REPAIR FIXED: Restored complete status list verification criteria
         return response.status_code in [200, 201, 204]
     except Exception:
         return False
@@ -89,7 +89,7 @@ for emp in master_emp_data:
         }
 
 if not raw_attendance_data:
-    st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
+    st.info("📋 System Log: No data rows found inside public.raw_attendance_feed table space.")
 else:
     processed_rows = []
     available_months_list = set()
@@ -111,9 +111,9 @@ else:
         # Link metadata profiles from cntr_employee_master table space dynamically
         meta = emp_metadata_map.get(emp_id_str, {"start_date": "N/A", "last_day_of_work": "N/A", "employee_status": "Active", "contact": "N/A"})
         
-        # ✔️ FIXED TYPE INTERCEPTORS: Protected float conversions from breaking on blank or null fields
+        # Dynamic float parser intercepts empty string values gracefully
         def safe_float(val):
-            if val is None or String(val).strip() == "":
+            if val is None or str(val).strip() == "":
                 return 0.00
             try:
                 return float(val)
