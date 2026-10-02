@@ -122,11 +122,11 @@ else:
     with mat_col3:
         search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + sorted(list(available_months_list)), key="mat_month_input")
     with mat_col4:
-        # 🆕 ADDED: EMP_Status dropdown filter parameter applied directly to the Main Attendance Matrix Grid
         search_mat_status = st.selectbox("Filter Ledger by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
         
     mat_col_slider = st.columns(1)
-    with mat_col_slider:
+    # ✔️ FIXED LAYOUT TRACKING: Direct index [0] targets single column container block explicitly to stop the TypeError
+    with mat_col_slider[0]:
         start_day, end_day = st.slider(
             "Select Day Duration Truncation Range:",
             min_value=1, max_value=31, value=(1, 31), key="mat_day_slider"
