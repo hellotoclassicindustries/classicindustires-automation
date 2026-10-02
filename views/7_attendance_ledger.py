@@ -1,11 +1,10 @@
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (READ-ONLY CORE INFRASTRUCTURE)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 OF 3 (READ-ONLY REPORTING INFRASTRUCTURE)
 # ============================================================================
 
 import streamlit as st
 import pandas as pd
 import requests
-import datetime
 import json
 
 # 🛰️ Secure Secret Credentials Resolution Routing
@@ -22,9 +21,9 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-@st.cache_data(ttl=5) # Responsive cache for rapid reporting turnaround checks
+@st.cache_data(ttl=2) # 2-second lightning cache for instant visualization updates
 def fetch_raw_attendance_feed():
-    """Fetches full attendance matrix tracking data from public.raw_attendance_feed"""
+    """Fetches full attendance matrix from Supabase public.raw_attendance_feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -36,7 +35,7 @@ def fetch_raw_attendance_feed():
 
 @st.cache_data(ttl=15)
 def fetch_cntr_employee_master():
-    """Queries current master workforce profile metrics from public.cntr_employee_master"""
+    """Queries production employee metadata profile registries out of public.cntr_employee_master"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master?order=employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -46,7 +45,7 @@ def fetch_cntr_employee_master():
     except Exception:
         return []
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (CALENDAR SLIDER & FEED GRID)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAIN LEDGER COMPONENT WITH ON-PAGE FILTERS)
 # ============================================================================
 
 st.title("📋 Enterprise Attendance & Workforce Analytics Console")
@@ -112,41 +111,38 @@ else:
         
     df = pd.DataFrame(processed_rows)
 
-    # ============================================================================
-    # 🎛️ SIDEBAR PARAMETER FILTERS INTERFACE SECTION
-    # ============================================================================
-    st.sidebar.header("🔍 Global Search Filters")
+    st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
     
-    selected_months = st.sidebar.multiselect(
-        "Filter Time Frame (Month_Year):",
-        options=sorted(list(available_months_list)),
-        default=sorted(list(available_months_list))
-    )
-    
-    search_emp_id = st.sidebar.text_input("Filter Employee ID (Attendance Grid):", "").strip()
-    search_emp_name = st.sidebar.text_input("Filter Employee Name (Attendance Grid):", "").strip()
-    
-    # 🗓️ DURATION WINDOW CALENDAR SLIDER FILTER RULE
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📅 Day Duration Truncation")
-    start_day, end_day = st.sidebar.slider(
-        "Select Calendar Duration (Days Interval Bounds):",
-        min_value=1, max_value=31, value=(1, 31)
-    )
+    # 🔍 INTEGRATED ON-PAGE MATRIX FILTERS (Matching Employee Registry style layout)
+    mat_col1, mat_col2, mat_col3 = st.columns(3)
+    with mat_col1:
+        search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
+    with mat_col2:
+        search_mat_name = st.text_input("Filter Ledger by Employee Name:", "", key="mat_name_input").strip()
+    with mat_col3:
+        search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + sorted(list(available_months_list)), key="mat_month_input")
+        
+    mat_col_slider = st.columns(1)[0]
+    with mat_col_slider:
+        start_day, end_day = st.slider(
+            "Select Day Duration Truncation Range:",
+            min_value=1, max_value=31, value=(1, 31), key="mat_day_slider"
+        )
 
-    # Apply core multi-conditional tracking masks
+    # Apply core layout row visibility filters
     filtered_df = df[df["DB_Show_Flag"] == True]
-    if len(selected_months) > 0:
-        filtered_df = filtered_df[filtered_df["Month_Year"].isin(selected_months)]
-    if search_emp_id:
-        filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_emp_id, case=False, na=False)]
-    if search_emp_name:
-        filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_emp_name, case=False, na=False)]
+    
+    if search_mat_id:
+        filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_mat_id, case=False, na=False)]
+    if search_mat_name:
+        filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_mat_name, case=False, na=False)]
+    if search_mat_month != "All Months":
+        filtered_df = filtered_df[filtered_df["Month_Year"] == search_mat_month]
 
     # Generate truncated sliding day sequence headers dynamically based on slider selection
     selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
 
-    # Re-order array grid mapping layout paths
+    # Re-order final array fields matching layout constraints
     grid_columns_order = (
         ["Month_Year", "EMP_ID", "EMP_Name"] + 
         selected_day_cols + 
@@ -154,15 +150,7 @@ else:
     )
     filtered_df = filtered_df[grid_columns_order]
 
-    # Display KPI Score Metrics Cards Summary panel
-    st.markdown("### 📈 Attendance Summary Calculations Panel")
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-    metric_col1.metric("Total Days Logged", f"{filtered_df['Total_Days'].sum():.1f} Days")
-    metric_col2.metric("Total Productive Hours", f"{filtered_df['Total_Hours'].sum():.2f} Hours")
-    metric_col3.metric("Accumulated Over_Time", f"{filtered_df['Over_Time'].sum():.2f} Hours")
-    metric_col4.metric("Accumulated Less_Time", f"{filtered_df['Less_Time'].sum():.2f} Hours")
-
-    st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
+    # Render clean structural data table
     cfg = {
         "Month_Year": st.column_config.TextColumn("Month_Year", width="small"),
         "EMP_ID": st.column_config.TextColumn("EMP ID", width="small"),
@@ -206,14 +194,14 @@ else:
         
     master_df = pd.DataFrame(master_rows_list)
     
-    # 🔍 SEPARATE WORKFORCE MASTER ROW LOOKUP COMPONENT SEARCH FILTERS
+    # 🔍 INDEPENDENT WORKFORCE MASTER DIRECTORY FILTERS
     dir_col1, dir_col2, dir_col3 = st.columns(3)
     with dir_col1:
         search_dir_id = st.text_input("Filter Directory by Employee ID:", "", key="dir_id_input").strip()
     with dir_col2:
         search_dir_name = st.text_input("Filter Directory by Employee Name:", "", key="dir_name_input").strip()
     with dir_col3:
-        search_dir_status = st.selectbox("Filter Directory by Profile Status:", options=["All Profiles", "Active Only", "In-Active Only"])
+        search_dir_status = st.selectbox("Filter Directory by Profile Status:", options=["All Profiles", "Active Only", "In-Active Only"], key="dir_status_input")
         
     # Execute Roster Directory layout filters array mutations
     if search_dir_id:
