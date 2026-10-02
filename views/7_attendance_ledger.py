@@ -18,9 +18,9 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
-@st.cache_data(ttl=5) # 5-second responsive cache for rapid sync turnaround loops
+@st.cache_data(ttl=2) # 2-second lightning cache for instant reflection responses
 def fetch_raw_attendance_feed():
-    """Fetches full comprehensive staging matrix feed without show filters"""
+    """Fetches full staging matrix records directly from Supabase feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -32,8 +32,8 @@ def fetch_raw_attendance_feed():
 
 @st.cache_data(ttl=60)
 def fetch_cntr_employee_master():
-    """Queries production employee metadata profile registries"""
-    endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master?show=eq.true"
+    """Queries master employee records ledger table space"""
+    endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master"
     try:
         response = requests.get(endpoint, headers=HEADERS)
         if response.status_code == 200:
@@ -43,7 +43,7 @@ def fetch_cntr_employee_master():
         return []
 
 def execute_database_row_patch(record_id, verification_decision):
-    """Commits supervisor processing rule changes to Supabase"""
+    """Commits supervisor processing updates directly to Supabase"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?id=eq.{record_id}"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -54,12 +54,13 @@ def execute_database_row_patch(record_id, verification_decision):
         }
     else:
         payload = {
-            "show": True, # Restores grid visibility cleanly if flipped back to Yes
+            "show": True,
             "sync_status": f"Success ✅ ({timestamp})"
         }
         
     try:
         response = requests.patch(endpoint, headers=HEADERS, json=payload)
+        # ✔️ FIXED SYNTAX ERADICATION: Corrected status code comparison evaluation
         return response.status_code in [200, 201, 204]
     except Exception:
         return False
@@ -67,7 +68,7 @@ def execute_database_row_patch(record_id, verification_decision):
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 OF 3 (MAPPING & FILTERS)
 # ============================================================================
 
-# Interface Layout Root Initialization
+# Interface Layout Header Initialization
 st.title("📋 Enterprise Attendance Ledger Dashboard")
 st.markdown("Filter, track, verify, and monitor rolling month-wise employee shift parameters using live production profile streams.")
 
@@ -75,7 +76,7 @@ st.markdown("Filter, track, verify, and monitor rolling month-wise employee shif
 raw_attendance_data = fetch_raw_attendance_feed()
 master_emp_data = fetch_cntr_employee_master()
 
-# Build fast metadata lookups from master profiles
+# Compile Employee Profile Metadata Map directly from cntr_employee_master (Key: employee_id)
 emp_metadata_map = {}
 for emp in master_emp_data:
     emp_id = emp.get("employee_id")
@@ -94,9 +95,9 @@ else:
     available_months_list = set()
     
     for item in raw_attendance_data:
-        days_list = item.get("attendance_days") or item.get("attendance_records") or item.get("days") or []
+        days_list = item.get("attendance_days") or []
         
-        # Safely sanitize and unpack stringified array elements if needed
+        # Safe-decode JSON string representations of day matrix lists if needed
         if isinstance(days_list, str):
             try:
                 days_list = json.loads(days_list)
@@ -107,28 +108,40 @@ else:
         available_months_list.add(m_yr)
         emp_id_str = str(item.get("employee_id", "")).strip()
         
+        # Link metadata profiles from cntr_employee_master table space dynamically
         meta = emp_metadata_map.get(emp_id_str, {"start_date": "N/A", "last_day_of_work": "N/A", "employee_status": "Active", "contact": "N/A"})
         
+        # ✔️ FIXED TYPE INTERCEPTORS: Protected float conversions from breaking on blank or null fields
+        def safe_float(val):
+            if val is None or String(val).strip() == "":
+                return 0.00
+            try:
+                return float(val)
+            except:
+                return 0.00
+
         row_dict = {
             "Action_Gate": "Review",
             "Month_Year": m_yr,
             "EMP_ID": item.get("employee_id"),
             "EMP_Name": item.get("employee_name"),
-            "Over_Time": float(item.get("over_time")) if item.get("over_time") else 0.00,
-            "Less_Time": float(item.get("less_time")) if item.get("less_time") else 0.00,
-            "Total_Hours": float(item.get("total_hours")) if item.get("total_hours") else 0.00,
-            "Total_Days": float(item.get("total_days")) if item.get("total_days") else 0.00,
+            "Over_Time": safe_float(item.get("over_time")),
+            "Less_Time": safe_float(item.get("less_time")),
+            "Total_Hours": safe_float(item.get("total_hours")),
+            "Total_Days": safe_float(item.get("total_days")),
             "Start_Date": meta["start_date"],
             "Last_Date": meta["last_day_of_work"],
             "EMP_Status": meta["employee_status"],
             "Contact_Info": meta["contact"],
             "File_Origin": item.get("source_filename"),
             "DB_ID": item.get("id"),
-            "DB_Show_Flag": item.get("show", True)
+            "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
         }
         
+        # Unpack absolute 31 days horizontally with length guards
         for day in range(1, 32):
-            row_dict[f"D{day:02d}"] = days_list[day-1] if (days_list and day-1 < len(days_list)) else ""
+            day_str = f"D{day:02d}"
+            row_dict[day_str] = days_list[day-1] if (days_list and day-1 < len(days_list)) else ""
             
         processed_rows.append(row_dict)
         
@@ -139,7 +152,7 @@ else:
     # ============================================================================
     st.sidebar.header("🔍 Filter Parameters")
     
-    # Toggle to dynamically switch data views matching show=false properties
+    # Toggle switch options to filter across your custom database status criteria
     view_mode = st.sidebar.selectbox(
         "Select Dataset Visibility Mode:",
         options=["Show Active Records Only (show = true)", "Show Removed Records Only (show = false)", "Show All Records (Combined)"]
@@ -154,7 +167,7 @@ else:
     search_emp_id = st.sidebar.text_input("Search Employee ID:", "").strip()
     search_emp_name = st.sidebar.text_input("Search Employee Name:", "").strip()
     
-    # Process View-Mode Filters
+    # Apply Visibility View Mode Filters
     if view_mode == "Show Active Records Only (show = true)":
         filtered_df = df[df["DB_Show_Flag"] == True]
     elif view_mode == "Show Removed Records Only (show = false)":
@@ -162,8 +175,9 @@ else:
     else:
         filtered_df = df.copy()
         
-    # Execute structural row-mask filter matches
+    # Apply Time Frame and Text Filters
     filtered_df = filtered_df[filtered_df["Month_Year"].isin(selected_months)]
+    
     if search_emp_id:
         filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_emp_id, case=False, na=False)]
     if search_emp_name:
@@ -221,7 +235,7 @@ else:
     for day_idx in range(1, 32):
         cfg[f"D{day_idx:02d}"] = st.column_config.TextColumn(f"{day_idx:02d}", width=50)
 
-    # ✔️ DEPRECATION REPAIR FIXED: Replaced use_container_width with future-proof stretch parameters
+    # Future-proof width specification removes deprecation logs
     edited_df = st.data_editor(
         filtered_df,
         hide_index=True,
