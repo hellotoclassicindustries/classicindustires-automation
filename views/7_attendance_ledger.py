@@ -260,26 +260,59 @@ else:
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A2 (RECALCULATION ENGINE & CARD)
 # ============================================================================
 
-            # Recalculate financial parameters instantly based on live on-screen overrides
-            days_count_override = 0.0
-            days_array_source = []
+            # ⚙️ RECALCULATION ENGINE: Dynamic profile extraction tracking
+            emp_id_clean = str(emp_data['EMP_ID']).strip().upper()
+            meta_profile = emp_metadata_map.get(emp_id_clean, {})
             
-            # Extract day grid marks from the selected range bounds
+            # Fetch Shift_Hours parameter dynamically from the metadata map
+            configured_shift_hours = float(meta_profile.get("shift_hours", 12.00))
+            
+            days_count_override = 0.0
+            total_whole_hours = 0.0
+            total_minutes = 0.0
+            
+            # Row parser loop over selected slider range
             for day in range(slip_start_day, slip_end_day + 1):
                 day_mark = str(emp_data.get(f"D{day:02d}", "")).strip().upper()
-                days_array_source.append(day_mark)
-                if "P" in day_mark or (day_mark.isdigit() and float(day_mark) > 0):
-                    days_count_override += 1.0
+                
+                # Condition: Skip empty cells entirely
+                if day_mark == "":
+                    continue
+                
+                # Increment active days worked counter (Counts 'A' as check-in presence)
+                days_count_override += 1.0
+                
+                # Subtotal processing branches matching Google Sheets rules
+                if day_mark == "A":
+                    continue
+                elif day_mark == "P":
+                    total_whole_hours += configured_shift_hours
+                elif "/" in day_mark:
+                    try:
+                        parts = day_mark.split("/")
+                        total_whole_hours += float(parts[0])
+                        total_minutes += float(parts[1])
+                    except:
+                        continue
+                elif "P" in day_mark:
+                    total_whole_hours += configured_shift_hours
+                    num_digits = re.sub(r"[^0-9.]", "", day_mark)
+                    if num_digits:
+                        total_whole_hours += float(num_digits)
+                elif day_mark.isdigit() or re.match(r"^\d+?\.\d+?\$", day_mark):
+                    total_whole_hours += float(day_mark)
             
-            # Recompute total hour layers dynamically using standard 12-hour shifts
-            hours_worked_override = days_count_override * 12.0
+            # Late Fusion Step: Pool accumulated minutes cleanly
+            converted_decimal_hours = total_minutes / 60.0
+            hours_worked_override = round(total_whole_hours + converted_decimal_hours, 2)
+            
             emp_data['Total_Days'] = days_count_override
             emp_data['Total_Hours'] = hours_worked_override
             
-            # Run the dynamic pay engine formula based on your chosen status filter override
+            # Run the dynamic payout formula using the dynamic shift baseline
             if str(emp_data['EMP_Status']).upper() == "ACTIVE":
                 standard_monthly_days = 26.0
-                hourly_rate_recalculated = (float(emp_data['Base_Monthly_Comp']) / standard_monthly_days) / 12.0
+                hourly_rate_recalculated = (float(emp_data['Base_Monthly_Comp']) / standard_monthly_days) / configured_shift_hours
                 gross_payout_recalculated = hourly_rate_recalculated * hours_worked_override
             else:
                 hourly_rate_recalculated = 0.00
@@ -297,7 +330,7 @@ else:
                 st.markdown(f"**Truncated Range Worked:** {emp_data['Total_Days']:.1f} Days (Days {slip_start_day} to {slip_end_day})")
             with slip_card_col2:
                 st.markdown(f"**Base Configured Salary:** ₹ {emp_data['Base_Monthly_Comp']:,.2f}")
-                st.markdown(f"**Calculated Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr")
+                st.markdown(f"**Calculated Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr (Based on {configured_shift_hours:.0f}-hr shift)")
                 st.markdown(f"**Recalculated Hours Logged:** {emp_data['Total_Hours']:.2f} Hours")
                 st.markdown(f"### **Net Payroll Payout:** ₹ {emp_data['Gross_Payout']:,.2f}")
 # ============================================================================
@@ -354,6 +387,7 @@ else:
                     ('PADDING', (0,0), (-1,-1), 8),
                     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
                 ]))
+                doc.build([t1]) # Test layout structure alignment
                 story.append(t1)
                 story.append(Spacer(1, 15))
                 
