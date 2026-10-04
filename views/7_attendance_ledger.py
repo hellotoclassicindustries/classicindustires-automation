@@ -7,6 +7,7 @@ import pandas as pd
 import requests
 import json
 import io
+import re  # 💡 Added to resolve the NameError regex parsing crash
 import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
