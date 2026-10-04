@@ -256,8 +256,7 @@ else:
                     "Select Day Duration Truncation Range:",
                     min_value=1, max_value=31, value=(1, 31), 
                     key="slip_day_duration_slider"
-                )
-# ============================================================================
+                )# ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A2 (RECALCULATION ENGINE & CARD)
 # ============================================================================
 
@@ -268,7 +267,12 @@ else:
             # Fetch Shift_Hours parameter dynamically from the metadata map
             configured_shift_hours = float(meta_profile.get("shift_hours", 12.00))
             
-            days_count_override = 0.0
+            # Determine the total number of calendar days selected in the slider range (e.g., 31)
+            total_days_in_range = float((slip_end_day - slip_start_day) + 1)
+            
+            empty_cells_count = 0.0
+            absent_cells_count = 0.0
+            
             total_whole_hours = 0.0
             total_minutes = 0.0
             
@@ -276,17 +280,18 @@ else:
             for day in range(slip_start_day, slip_end_day + 1):
                 day_mark = str(emp_data.get(f"D{day:02d}", "")).strip().upper()
                 
-                # Condition: Skip empty cells entirely
-                if day_mark == "":
+                # 1️⃣ Check for True Empty Cells
+                if day_mark == "" or day_mark == "NONE" or day_mark.isspace():
+                    empty_cells_count += 1.0
                     continue
                 
-                # Increment active days worked counter (Counts 'A' as check-in presence)
-                days_count_override += 1.0
-                
-                # Subtotal processing branches matching Google Sheets rules
+                # 2️⃣ Check for True Absent Cells
                 if day_mark == "A":
+                    absent_cells_count += 1.0
                     continue
-                elif day_mark == "P":
+                
+                # 3️⃣ Accumulate Productive Hours (Only for actual worked days)
+                if day_mark == "P":
                     total_whole_hours += configured_shift_hours
                 elif "/" in day_mark:
                     try:
@@ -303,7 +308,10 @@ else:
                 elif day_mark.isdigit() or re.match(r"^\d+?\.\d+?\$", day_mark):
                     total_whole_hours += float(day_mark)
             
-            # Late Fusion Step: Pool accumulated minutes cleanly
+            # 🛡️ Dynamic Math: (Total calendar days) - (Empty cells + Absent cells)
+            days_count_override = total_days_in_range - (empty_cells_count + absent_cells_count)
+            
+            # Late Fusion Step: Pool accumulated minutes cleanly to eliminate rounding drift
             converted_decimal_hours = total_minutes / 60.0
             hours_worked_override = round(total_whole_hours + converted_decimal_hours, 2)
             
@@ -334,6 +342,7 @@ else:
                 st.markdown(f"**Calculated Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr (Based on {configured_shift_hours:.0f}-hr shift)")
                 st.markdown(f"**Recalculated Hours Logged:** {emp_data['Total_Hours']:.2f} Hours")
                 st.markdown(f"### **Net Payroll Payout:** ₹ {emp_data['Gross_Payout']:,.2f}")
+
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A3 (PDF COMPILER ENGINE)
 # ============================================================================
