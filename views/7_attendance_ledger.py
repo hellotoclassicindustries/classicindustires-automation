@@ -256,7 +256,8 @@ else:
                     "Select Day Duration Truncation Range:",
                     min_value=1, max_value=31, value=(1, 31), 
                     key="slip_day_duration_slider"
-                )# ============================================================================
+                )
+# ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A2 (RECALCULATION ENGINE & CARD)
 # ============================================================================
 
@@ -336,7 +337,8 @@ else:
                 st.markdown(f"**Employee ID & Name:** {emp_data['EMP_ID']} - {emp_data['EMP_Name']}")
                 st.markdown(f"**Pay Cycle Period:** {emp_data['Month_Year']}")
                 st.markdown(f"**Roster Profile Status:** `{emp_data['EMP_Status']}`")
-                st.markdown(f"**Truncated Range Worked:** {emp_data['Total_Days']:.1f} Days (Days {slip_start_day} to {slip_end_day})")
+                # 💡 Formatting changed to :.0f to completely hide decimal zero placeholders
+                st.markdown(f"**Truncated Range Worked:** {emp_data['Total_Days']:.0f} Days (Days {slip_start_day} to {slip_end_day})")
             with slip_card_col2:
                 st.markdown(f"**Base Configured Salary:** ₹ {emp_data['Base_Monthly_Comp']:,.2f}")
                 st.markdown(f"**Calculated Hourly Rate:** ₹ {emp_data['Rate_Per_Hour']:,.2f} / hr (Based on {configured_shift_hours:.0f}-hr shift)")
