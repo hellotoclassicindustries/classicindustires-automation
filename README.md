@@ -25,6 +25,9 @@ The codebase utilizes a modular view strategy to isolate core dashboard utilitie
     ├── 2_Stock_Master.py   # Inventory KPI Summaries & Donut Charts
     ├── 3_Daily_Ledger.py   # Chronological Cloud Transaction Matrix
     └── 4_System_Guide.py   # On-Site Operator Standard Operating Procedures
+    └── 5_Forcast_Simulation.py   # Min requirement for reaching to Break even calculation
+    └── 6_Invice_Generator.py   # Convert Transaction to monthly invoice for billing
+    └── 7_Invice_Generator.py   # Attendance ledger and salary 
 ```
 
 ---
