@@ -279,9 +279,8 @@ else:
                 ]
                 table_content.append(row_cells)
                 
-            # 📐 Total 552 points allocated explicitly across document widths
-            col_widths = [65, 55, 120, 55, 60, 117, 80]
-            lt1 = Table(table_content, colWidths=col_widths, repeatRows=1)
+            # 📐 Pass dimensions straight into the Table initialization signature to protect code format
+            lt1 = Table(table_content, colWidths=[65, 55, 120, 55, 60, 117, 80], repeatRows=1)
             lt1.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1A365D")),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E0")),
