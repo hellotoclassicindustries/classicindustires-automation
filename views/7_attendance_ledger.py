@@ -164,7 +164,7 @@ else:
         search_mat_status = st.selectbox("Filter Ledger by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
         
     mat_col_slider = st.columns(1)
-    with mat_col_slider:
+    with mat_col_slider[0]:
         start_day, end_day = st.slider(
             "Select Day Duration Truncation Range:",
             min_value=1, max_value=31, value=(1, 31), key="mat_day_slider"
