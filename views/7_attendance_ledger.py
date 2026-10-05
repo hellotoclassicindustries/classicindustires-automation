@@ -206,6 +206,35 @@ else:
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - FRAGMENT A1 (OVERRIDE FILTER ROW)
 # ============================================================================
+    st.markdown("### 📥 Export Clean Analytical Records")
+    
+    # 🧼 Create a sterile copy of the data frame to manipulate for the export layer
+    csv_export_df = render_df.copy()
+    
+    # Identify all active daily calendar status tracking columns currently on screen
+    active_d_cols = [col for col in csv_export_df.columns if col.startswith("D")]
+    
+    # 🔒 Force Excel/Sheets to read text literals: wrap cell targets inside ="TEXT" formulas
+    for d_col in active_d_cols:
+        csv_export_df[d_col] = csv_export_df[d_col].apply(
+            lambda x: f'="{str(x).strip()}"' if pd.notna(x) and str(x).strip() != "" else ""
+        )
+        
+    # Convert data frame to system friendly UTF-8 byte arrays
+    @st.cache_data(ttl=2)
+    def convert_ledger_df_to_csv(dataframe):
+        return dataframe.to_csv(index=False).encode('utf-8')
+        
+    clean_csv_bytes = convert_ledger_df_to_csv(csv_export_df)
+    
+    st.download_button(
+        label="📥 Download Historical Matrix Ledger as Clean CSV",
+        data=clean_csv_bytes,
+        file_name=f"Attendance_Ledger_Export_{datetime.datetime.now().strftime('%Y-%m-%d')}.csv",
+        mime="text/csv",
+        type="secondary",
+        key="attendance_ledger_csv_export_btn"
+    )
 
     st.markdown("---")
     st.markdown("### 🧾 Interactive Salary Slip Generator Window")
