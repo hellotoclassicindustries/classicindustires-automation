@@ -9,7 +9,7 @@ import json
 import io
 import re  
 import datetime
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -51,8 +51,9 @@ def fetch_cntr_employee_master():
         return []
     except Exception:
         return []
+
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 - SECTION 1 (DATA PROCESSING & MATRIX SETUP)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: INITIAL DATA PROCESSING LOOP
 # ============================================================================
 
 st.title("📋 Enterprise Attendance & Workforce Analytics Console")
@@ -75,6 +76,9 @@ for emp in master_emp_data:
             "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
             "show_flag": emp.get("show", True)
         }
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 - SUB-PART A (DATASET INTERFACE SETUP)
+# ============================================================================
 
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
@@ -93,8 +97,11 @@ else:
         emp_id_str = str(item.get("employee_id") or "").strip().upper()
         
         meta = emp_metadata_map.get(emp_id_str, {
-            "start_date": "N/A", "last_day_of_work": "N/A", 
-            "employee_status": "Active", "comp_monthly": 0.00, "shift_hours": 12.00
+            "start_date": "N/A", 
+            "last_day_of_work": "N/A", 
+            "employee_status": "Active",
+            "comp_monthly": 0.00,
+            "shift_hours": 12.00
         })
         
         def safe_float(val):
@@ -141,7 +148,7 @@ else:
         
     df = pd.DataFrame(processed_rows)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 - SECTION 2 (ON-PAGE LAYOUT & MATRIX DISPLAY)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 - SUB-PART B (FILTERS & RENDER ENGINE)
 # ============================================================================
 
     st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
@@ -193,7 +200,7 @@ else:
         "Over_Time": st.column_config.NumberColumn("Extra Hrs", format="%.2f", width="small"),
         "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small"),
         "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small"),
-        "Total_Days": st.column_config.NumberColumn("Total Days", format="%.0f", width="small"),
+        "Total_Days": st.column_config.NumberColumn("Total Days", format="%.1f", width="small"),
         "Base_Monthly_Comp": st.column_config.NumberColumn("Base Comp Rate", format="₹%.2f", width="small"),
         "Rate_Per_Hour": st.column_config.NumberColumn("Hourly Rate", format="₹%.2f", width="small"),
         "Gross_Payout": st.column_config.NumberColumn("Calculated Gross Payout", format="₹%.2f", width="medium"),
@@ -204,105 +211,97 @@ else:
 
     st.dataframe(render_df, hide_index=True, width="stretch", column_config=cfg)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 - SECTION 3 (EXPORT CHANNELS DATA LAYERS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 - SUB-PART C (EXPORT WORKSPACE)
 # ============================================================================
 
-    st.markdown("### 📥 Export Clean Analytical Records")
-    export_col1, export_col2 = st.columns(2)
+    # 📥 DATA EXPORT WORKSPACE (CSV Fix & Matrix Landscape PDF Exporter)
+    st.markdown("#### 📥 Export Historical Attendance Matrix Ledger")
+    down_col1, down_col2 = st.columns(2)
     
-    with export_col1:
-        csv_export_df = render_df.copy()
-        active_d_cols = [col for col in csv_export_df.columns if col.startswith("D")]
+    with down_col1:
+        # Prepend escape token to stop spreadsheet programs converting fractional text like "10/30" to Date objects
+        csv_df = render_df.copy()
+        for col in csv_df.columns:
+            if col.startswith("D") and col[1:].isdigit():
+                csv_df[col] = csv_df[col].apply(lambda x: f"\t{x}" if (isinstance(x, str) and "/" in x) else x)
         
-        # 🔒 EXCEL DATE PROTECTION FIX: Force strict text strings using single quotes
-        for d_col in active_d_cols:
-            csv_export_df[d_col] = csv_export_df[d_col].apply(
-                lambda x: f"'{str(x).strip()}" if pd.notna(x) and str(x).strip() != "" else ""
-            )
-            
-        @st.cache_data(ttl=2)
-        def convert_ledger_df_to_csv(dataframe):
-            return dataframe.to_csv(index=False).encode('utf-8')
-            
-        clean_csv_bytes = convert_ledger_df_to_csv(csv_export_df)
+        csv_buffer = io.StringIO()
+        csv_df.to_csv(csv_buffer, index=False)
         
         st.download_button(
-            label="📥 Download Full Ledger as Clean CSV",
-            data=clean_csv_bytes,
-            file_name=f"Attendance_Ledger_Export_{datetime.datetime.now().strftime('%Y-%m-%d')}.csv",
+            label="📊 Download Ledger as CSV (Preserve Formats)",
+            data=csv_buffer.getvalue(),
+            file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.csv",
             mime="text/csv",
-            type="secondary",
-            key="attendance_ledger_csv_export_btn",
-            use_container_width=True
+            key="ledger_csv_download_btn"
         )
-
-    with export_col2:
-        def generate_full_ledger_pdf(dataframe):
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(
-                buffer, pagesize=letter, 
-                rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
+        
+    with down_col2:
+        def generate_ledger_matrix_pdf(dataframe):
+            pdf_buffer = io.BytesIO()
+            document = SimpleDocTemplate(
+                pdf_buffer, pagesize=landscape(letter),
+                rightMargin=20, leftMargin=20, topMargin=30, bottomMargin=30
             )
-            story = []
-            styles = getSampleStyleSheet()
+            story_components = []
+            pdf_styles = getSampleStyleSheet()
             
-            title_style = ParagraphStyle(
-                'LedgerTitle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=colors.HexColor("#1A365D"), alignment=1
+            title_text_style = ParagraphStyle(
+                'LedgerTitleStyle', parent=pdf_styles['Heading1'],
+                fontSize=14, leading=18, textColor=colors.HexColor("#1A365D"), alignment=0
             )
-            meta_style = ParagraphStyle(
-                'LedgerMeta', parent=styles['Normal'], fontSize=9, leading=12, textColor=colors.gray, alignment=1
+            header_cell_style = ParagraphStyle(
+                'LedgerHeaderStyle', parent=pdf_styles['Normal'],
+                fontSize=6, leading=8, textColor=colors.white, fontName="Helvetica-Bold"
             )
-            cell_text_style = ParagraphStyle(
-                'LedgerCellText', parent=styles['Normal'], fontSize=8, leading=10
+            data_cell_style = ParagraphStyle(
+                'LedgerDataStyle', parent=pdf_styles['Normal'],
+                fontSize=5, leading=7, textColor=colors.black
             )
-            header_text_style = ParagraphStyle(
-                'LedgerHeaderCellText', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.white
-            )
-
-            story.append(Paragraph("CLASSIC INDUSTRIES", title_style))
-            story.append(Paragraph(f"Historical Workforce Attendance Summary Ledger - Generated {datetime.datetime.now().strftime('%Y-%m-%d')}", meta_style))
-            story.append(Spacer(1, 15))
             
-            pdf_cols = ["Month_Year", "EMP_ID", "EMP_Name", "Total_Days", "Total_Hours", "Gross_Payout", "EMP_Status"]
-            pdf_headers = [Paragraph(f"<b>{c.replace('_',' ')}</b>", header_text_style) for c in pdf_cols]
+            story_components.append(Paragraph("Main Historical Attendance Matrix Ledger", title_text_style))
+            story_components.append(Spacer(1, 10))
             
-            table_content = [pdf_headers]
-            for _, r in dataframe.iterrows():
-                row_cells = [
-                    Paragraph(str(r["Month_Year"]), cell_text_style),
-                    Paragraph(str(r["EMP_ID"]), cell_text_style),
-                    Paragraph(str(r["EMP_Name"]), cell_text_style),
-                    Paragraph(f"{float(r['Total_Days']):.0f}", cell_text_style),
-                    Paragraph(f"{float(r['Total_Hours']):.2f}", cell_text_style),
-                    Paragraph(f"₹{float(r['Gross_Payout']):,.2f}", cell_text_style),
-                    Paragraph(str(r["EMP_Status"]), cell_text_style)
-                ]
-                table_content.append(row_cells)
-                
-            # 📐 Bypassing structural filters by parsing dimensions from split string formats securely
-            width_string_config = "65,55,120,55,60,117,80"
-            parsed_column_widths = [float(width.strip()) for width in width_string_config.split(",")]
+            headers = list(dataframe.columns)
+            pdf_table_data = [[Paragraph(f"<b>{h}</b>", header_cell_style) for h in headers]]
             
-            lt1 = Table(table_content, colWidths=parsed_column_widths, repeatRows=1)
-            lt1.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1A365D")),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E0")),
-                ('PADDING', (0,0), (-1,-1), 5),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F7FAFC")])
+            for _, row_data in dataframe.iterrows():
+                row_cells = []
+                for header_item in headers:
+                    val = row_data[header_item]
+                    val_str = f"{val:.2f}" if isinstance(val, float) else str(val)
+                    row_cells.append(Paragraph(val_str, data_cell_style))
+                pdf_table_data.append(row_cells)
+            
+            total_cols = len(headers)
+            available_width = 752  # 792 (landscape letter width) - 40 (margins)
+            column_width = max(20, available_width / total_cols)
+            calculated_widths = [column_width] * total_cols
+            
+            matrix_table = Table(pdf_table_data, colWidths=calculated_widths, repeatRows=1)
+            matrix_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('GRID', (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E0")),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7FAFC")]),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ]))
-            story.append(lt1)
-            doc.build(story)
-            buffer.seek(0)
-            return buffer.getvalue()
+            
+            story_components.append(matrix_table)
+            document.build(story_components)
+            pdf_buffer.seek(0)
+            return pdf_buffer.getvalue()
 
-        if st.button("📥 Generate Full Ledger Report PDF", key="full_ledger_pdf_btn", use_container_width=True):
-            full_pdf_bytes = generate_full_ledger_pdf(render_df)
+        if not render_df.empty:
+            ledger_pdf_bytes = generate_ledger_matrix_pdf(render_df)
             st.download_button(
-                label="⬇️ Click to Download Full Ledger PDF",
-                data=full_pdf_bytes,
-                file_name=f"Workforce_Ledger_Summary_{datetime.datetime.now().strftime('%Y-%m-%d')}.pdf",
+                label="📄 Download Ledger as PDF (Landscape)",
+                data=ledger_pdf_bytes,
+                file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.pdf",
                 mime="application/pdf",
-                type="primary",
-                use_container_width=True
+                key="ledger_pdf_download_btn"
             )
+        else:
+            st.button("📄 Download Ledger as PDF (Landscape)", disabled=True)
