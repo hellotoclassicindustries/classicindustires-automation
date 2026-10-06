@@ -1,5 +1,5 @@
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 (VIEW ROUTING & DATE MATH TOOLS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 1 (VIEW ROUTING & GLOBAL UTILITIES)
 # ============================================================================
 
 import streamlit as st
@@ -30,9 +30,19 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+# 🛠️ GLOBAL HELPERS: Moved to top-level module scope to avoid compilation NameErrors
+def safe_float(val):
+    """Safely converts database parameters into float formatting targets"""
+    if val is None or str(val).strip() == "" or str(val).lower() == "none":
+        return 0.00
+    try:
+        return float(val)
+    except:
+        return 0.00
+
 @st.cache_data(ttl=2)
 def fetch_unified_attendance_ledger():
-    """Queries the newly deployed public.v_attendance_ledger Supabase view"""
+    """Queries the deployed public.v_attendance_ledger Supabase view database layer"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/v_attendance_ledger?order=month_year.desc,employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
@@ -43,18 +53,17 @@ def fetch_unified_attendance_ledger():
         return []
 
 def update_db_payment_status(employee_id, month_year, new_status):
-    """Performs transactional REST PATCH to persist updated payment state down to the Supabase feed table layer"""
+    """Performs transactional REST PATCH to persist updated status changes down to Supabase feed tables"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?employee_id=eq.{employee_id}&month_year=eq.{month_year}"
     payload = {"payment_status": new_status}
     try:
         res = requests.patch(endpoint, headers=HEADERS, json=payload)
-        # SYNTAX FIX: Successfully matches common REST patch completion standard codes
         return res.status_code in [200, 201, 204]
     except Exception:
         return False
 
 def parse_row_date(month_year_str):
-    """Maps custom string variations like 'September-2026' or '09-2026' to a proper datetime.date object"""
+    """Maps custom string variations like 'September-2026' or '09-2026' into a proper datetime.date object"""
     if not month_year_str or str(month_year_str).strip() == "N/A":
         return None
     normalized = str(month_year_str).strip().replace("/", "-")
@@ -81,84 +90,12 @@ def get_days_in_month(month_year_str):
         return int(calendar.monthrange(dt.year, dt.month)[1])
     return 31
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 & 3 (PROCESSING ENGINE & FILTER PANEL)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (FILTERS INTERFACE & MATRIX PROCESSING LOOP)
 # ============================================================================
 
-# Load integrated data rows directly from the unified view schema
+# Load integrated view table lines directly from Supabase
 view_records_data = fetch_unified_attendance_ledger()
 
-def process_workforce_metrics_from_tokens(days_list, base_shift):
-    """
-    DYNAMIC PARSING ENGINE: 
-    Rebuilds working hours and proportional days directly from raw characters
-    to match your exact Google Sheets hierarchy and avoid database data corruption.
-    """
-    calculated_hours = 0.0
-    raw_days_present = 0.0
-    
-    for token in days_list:
-        if not token:
-            continue
-        clean = str(token).strip().upper()
-        
-        # Check for absences / blank spaces
-        if clean == "" or clean == "A":
-            hours_today = 0.0
-        # Standard Present tag matches their master required contract base shift length
-        elif clean == "P":
-            hours_today = base_shift
-            raw_days_present += 1.0
-        # Pure whole integer entries
-        elif re.match(r"^\d+$", clean):
-            hours_today = float(clean)
-            if hours_today > 0:
-                raw_days_present += 1.0
-        # Fractional time markers splitting hours and minutes (e.g. '11/30')
-        elif "/" in clean:
-            try:
-                parts = clean.split("/")
-                hours_today = float(parts[0]) + (float(parts[1]) / 60.0)
-                if hours_today > 0:
-                    raw_days_present += 1.0
-            except:
-                hours_today = 0.0
-        # DYNAMIC TO-DO ALIGNMENT FIX: P4 adds EXACTLY 4 hours of overtime to their contract base
-        elif clean == "P4":
-            hours_today = base_shift + 4.0
-            raw_days_present += 1.0
-        # Mixed presence indicator tags
-        elif "P" in clean:
-            try:
-                numeric_extracted = re.sub(r"[^0-9.]", "", clean)
-                overtime_val = float(numeric_extracted) if numeric_extracted else 0.0
-                hours_today = base_shift + overtime_val
-                raw_days_present += 1.0
-            except:
-                hours_today = base_shift
-                raw_days_present += 1.0
-        # General text strings wrapping numeric variables (e.g. 'OT3.5')
-        else:
-            try:
-                numeric_extracted = re.sub(r"[^0-9.]", "", clean)
-                hours_today = float(numeric_extracted) if numeric_extracted else 0.0
-                if hours_today > 0:
-                    raw_days_present += 1.0
-            except:
-                hours_today = 0.0
-                
-        calculated_hours += hours_today
-        
-    # Proportional fractional day allocation tracking logic (To-Do List Item #2)
-    if base_shift > 0:
-        actual_days_worked = calculated_hours / base_shift
-    else:
-        actual_days_worked = raw_days_present
-        
-    return round(calculated_hours, 2), int(raw_days_present), round(actual_days_worked, 2)
-
-# ============================================================================
-# RENDERING INTERFACE CONDITIONAL PIPELINE
-# ============================================================================
 if not view_records_data:
     st.info("📋 System Log: No integrated database rows found inside the v_attendance_ledger workspace view.")
 else:
@@ -170,7 +107,7 @@ else:
     default_start = past_month_date.replace(day=1)
     default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
 
-    # Single Calendar input widget setup - Enforced unique baseline mapping key
+    # Single calendar dropdown selector input widget
     chosen_dates = st.date_input(
         "Select Payout Month:",
         value=(default_start, default_end),
@@ -182,12 +119,7 @@ else:
     else:
         start_cal, end_cal = default_start, default_end
 
-    # Calculate selection lengths silently behind the scenes
-    total_days_basis = int((end_cal - start_cal).days) + 1
-    if total_days_basis <= 0:
-        total_days_basis = 30
-
-    # Layout filter fields row
+    # Search filter field layout column rows - Day columns view range slider completely removed
     mat_col1, mat_col2, mat_col4 = st.columns(3)
     with mat_col1:
         search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
@@ -196,15 +128,13 @@ else:
     with mat_col4:
         search_mat_status = st.selectbox("Filter by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
 
-    start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
-
-    # Construct the tracking dataframe dynamically using calendar limits
+    # Construct the tracking dataframe dynamically using calendar window checks
     processed_rows = []
     for item in view_records_data:
         m_yr = item.get("month_year") or "N/A"
         row_dt = parse_row_date(m_yr)
         
-        # Filter rows by calendar input bounds
+        # Apply date boundary filtering logic
         if row_dt:
             if not (start_cal <= row_dt <= end_cal):
                 continue
@@ -212,18 +142,22 @@ else:
         days_list = item.get("attendance_days") or []
         emp_id_str = str(item.get("employee_id") or "").strip().upper()
         
-        # Pull parameters safely from joint data schema view properties
+        # Extract variables securely using globally declared helper utility block
+        total_hours_worked = safe_float(item.get("total_hours"))
+        total_days_worked = safe_float(item.get("total_days"))
         base_monthly_comp = safe_float(item.get("base_monthly_comp"))
-        configured_shift_hours = safe_float(item.get("shift_hours") or 8.00)
+        configured_shift_hours = safe_float(item.get("shift_hours") or 12.00)
         current_status = item.get("employee_status") or "Active"
         
-        # 🛡️ THE CRITICAL PIECE: Ignore corrupted DB totals, force clean in-memory reconstruction
-        total_hours_worked, total_days_present, actual_days_worked = process_workforce_metrics_from_tokens(days_list, configured_shift_hours)
-        
+        # 🧮 IN-MEMORY WORKFORCE CALCULATIONS PIPELINES
         total_minutes_worked = total_hours_worked * 60.0
         row_month_days = get_days_in_month(m_yr)
+        
+        if configured_shift_hours > 0:
+            actual_days_worked = round(total_hours_worked / configured_shift_hours, 2)
+        else:
+            actual_days_worked = 0.00
 
-        # Payroll rate logic computations
         if current_status.upper() == "ACTIVE" and row_month_days > 0 and configured_shift_hours > 0:
             per_hour_rate = (base_monthly_comp / float(row_month_days)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
@@ -241,8 +175,8 @@ else:
             "Less_Time": safe_float(item.get("less_time")),
             "Total_Hours": total_hours_worked, 
             "Total_Minutes": total_minutes_worked, 
-            "Total_Days": total_days_present,                  # True Count of raw days present
-            "Actual_Days_Worked": actual_days_worked,           # Correct Proportional Allocation Metric
+            "Total_Days": total_days_worked,                   
+            "Actual_Days_Worked": actual_days_worked,           
             "Start_Date": item.get("start_date") or "N/A",
             "Last_Date": item.get("last_day_of_work") or "N/A", 
             "EMP_Status": current_status,
@@ -259,11 +193,11 @@ else:
         
     df = pd.DataFrame(processed_rows)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 4A (TABLE GRAPHICS ENGINE)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - SUB-PART 3A (TABLE GRAPHICS ENGINE)
 # ============================================================================
 
     if df.empty:
-        st.warning("⚠️ No operational records match the active tracking filters selected.")
+        st.warning("⚠️ No operational view records match the active tracking filters selected.")
     else:
         # Apply filter conditions
         filtered_df = df[df["DB_Show_Flag"] == True].copy()
@@ -276,11 +210,11 @@ else:
         elif search_mat_status == "In-Active Only":
             filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
 
-        selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
+        # Enforced static 31-day array grid column ordering layout 
+        all_day_cols = [f"D{d:02d}" for d in range(1, 32)]
         
-        # Grid column order setup including Actual_Days_Worked and legacy elements
         grid_columns_order = (
-            ["Month_Year", "EMP_ID", "EMP_Name"] + selected_day_cols + 
+            ["Month_Year", "EMP_ID", "EMP_Name"] + all_day_cols + 
             ["Over_Time", "Less_Time", "Total_Hours", "Total_Minutes", "Total_Days", "Actual_Days_Worked", "Base_Monthly_Comp", 
              "Rate_Per_Hour", "Rate_Per_Minute", "Gross_Payout", "Payment_Status", "Start_Date", "Last_Date", "EMP_Status"]
         )
@@ -305,16 +239,16 @@ else:
             "Payment_Status": st.column_config.SelectboxColumn("Payment Status", width="medium", options=["Pending", "Done"], required=True),
             "EMP_Status": st.column_config.TextColumn("EMP Status", width="small", disabled=True)
         }
-        for d_col in selected_day_cols:
+        for d_col in all_day_cols:
             if d_col in validated_columns:
                 cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
 
         edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 4B (SYNC, FORMULAS & EXPORTS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 3B (SYNC & EXPORT WORKSPACES)
 # ============================================================================
 
-        # Detect modifications and execute dynamic database updates down to public.raw_attendance_feed
+        # Handle user-edited table rows to update raw data state elements in the backend database
         if st.session_state.attendance_ledger_data_editor.get("edited_rows"):
             modifications = st.session_state.attendance_ledger_data_editor["edited_rows"]
             for numeric_index_str, altered_props in modifications.items():
