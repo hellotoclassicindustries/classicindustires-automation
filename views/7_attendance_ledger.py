@@ -30,7 +30,8 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-@st.sidebar.cache_data(ttl=2)
+# FIX: Changed from st.sidebar.cache_data to the standard global st.cache_data
+@st.cache_data(ttl=2)
 def fetch_raw_attendance_feed():
     """Fetches full attendance matrix from Supabase public.raw_attendance_feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
@@ -42,7 +43,8 @@ def fetch_raw_attendance_feed():
     except Exception:
         return []
 
-@st.sidebar.cache_data(ttl=15)
+# FIX: Changed from st.sidebar.cache_data to the standard global st.cache_data
+@st.cache_data(ttl=15)
 def fetch_cntr_employee_master():
     """Queries production employee metadata profile registries"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master?order=employee_id.asc"
@@ -92,11 +94,8 @@ def get_days_in_month(month_year_str):
         return int(calendar.monthrange(dt.year, dt.month)[1])
     return 31
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (INITIAL DATA METADATA EXTRACTION)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (MASTER INGESTION & PROCESSING ENGINES)
 # ============================================================================
-
-st.title("📋 Enterprise Attendance & Workforce Analytics Console")
-st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
 
 # Load Raw Datasets from Synced Production Pools
 raw_attendance_data = fetch_raw_attendance_feed()
@@ -173,7 +172,7 @@ else:
     default_start = past_month_date.replace(day=1)
     default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
 
-    # Single Calendar input widget setup
+    # Single Calendar input dropdown configuration box layout
     chosen_dates = st.date_input(
         "Select Payout Month:",
         value=(default_start, default_end),
@@ -185,7 +184,7 @@ else:
     else:
         start_cal, end_cal = default_start, default_end
 
-    # Layout filter fields row
+    # Layout textual filter fields row
     mat_col1, mat_col4 = st.columns(2)
     with mat_col1:
         search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
@@ -194,7 +193,7 @@ else:
 
     start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
 
-    # Construct tracking rows prioritizing maximum database data usage
+    # Construct tracking rows prioritizing dynamic memory computation architectures
     processed_rows = []
     for item in raw_attendance_data:
         m_yr = item.get("month_year") or "N/A"
@@ -217,7 +216,7 @@ else:
             try: return float(val)
             except: return 0.00
 
-        # PRIORITIZE DB COLUMNS: Read pre-calculated records straight from DB columns
+        # MAX DB USAGE POLICY: Pull primary metrics straight out of raw_attendance_feed table columns
         db_hours = safe_float(item.get("total_hours"))
         db_days = safe_float(item.get("total_days"))
         
@@ -236,7 +235,7 @@ else:
         lesstime_hours = safe_float(item.get("less_time"))
         row_month_days = get_days_in_month(m_yr)
 
-        # In-Memory Payroll rate engine execution
+        # Payroll rate logic computations
         if current_status.upper() == "ACTIVE" and row_month_days > 0:
             per_hour_rate = (configured_monthly_comp / float(row_month_days)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
