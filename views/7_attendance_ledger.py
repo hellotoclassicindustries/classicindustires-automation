@@ -133,63 +133,39 @@ def parse_days_to_hours(days_list, p_val):
                 calculated_days += 1.0
     return calculated_hours, calculated_days
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (TRUE CALENDAR WIDGET & RANGE CONTROLS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (CALENDAR SYSTEM FILTERS & DATAFRAME ASSEMBLY)
 # ============================================================================
 
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
     st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
-    st.markdown("##### **📅 Advanced Calendar Preset Options**")
     
+    # 📆 CALCULATE PAST MONTH AUTOMATICALLY
     today = datetime.date.today()
-    
-    # Render interactive button bar row
-    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
-    
-    # Initialize session tracking range fallbacks safely
-    if "cal_start_date" not in st.session_state or "cal_end_date" not in st.session_state:
-        st.session_state["cal_start_date"] = today.replace(day=1)
-        st.session_state["cal_end_date"] = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    past_month_date = today - relativedelta(months=1)
+    default_start = past_month_date.replace(day=1)
+    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month))
 
-    with btn_col1:
-        if st.button("🗓️ This Month", use_container_width=True):
-            st.session_state["cal_start_date"] = today.replace(day=1)
-            st.session_state["cal_end_date"] = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-    with btn_col2:
-        if st.button("⏮️ Past Month", use_container_width=True):
-            prev_m = today - relativedelta(months=1)
-            st.session_state["cal_start_date"] = prev_m.replace(day=1)
-            st.session_state["cal_end_date"] = prev_m.replace(day=calendar.monthrange(prev_m.year, prev_m.month)[1])
-    with btn_col3:
-        if st.button("⏳ 3 Months Before", use_container_width=True):
-            three_m = today - relativedelta(months=3)
-            st.session_state["cal_start_date"] = three_m.replace(day=1)
-            st.session_state["cal_end_date"] = three_m.replace(day=calendar.monthrange(three_m.year, three_m.month)[1])
-    with btn_col4:
-        if st.button("🌐 Reset / View All", use_container_width=True):
-            st.session_state["cal_start_date"] = today - relativedelta(years=2)
-            st.session_state["cal_end_date"] = today + relativedelta(years=2)
-
-    # TRUE CALENDAR PICKER: Renders single graphical standard input
+    # Single Calendar Picker: Renamed to "Select Payout Month" with automatic previous-month defaulting
     chosen_dates = st.date_input(
-        "Refine Target Range from Calendar View:",
-        value=(st.session_state["cal_start_date"], st.session_state["cal_end_date"]),
+        "Select Payout Month:",
+        value=(default_start, default_end),
         key="main_graphical_calendar_picker"
     )
 
-    # Safely unpack calendar ranges
+    # Safely unpack calendar range adjustments
     if isinstance(chosen_dates, tuple) and len(chosen_dates) == 2:
         start_cal, end_cal = chosen_dates
     else:
-        start_cal, end_cal = st.session_state["cal_start_date"], st.session_state["cal_end_date"]
+        start_cal, end_cal = default_start, default_end
 
-    # Calculate absolute count of whole numbers automatically
+    # Calculate selection lengths silently behind the scenes
     total_days_basis = int((end_cal - start_cal).days) + 1
     if total_days_basis <= 0:
         total_days_basis = 30
 
-    # Layout search strings row
+    # Layout search fields row
     mat_col1, mat_col2, mat_col4 = st.columns(3)
     with mat_col1:
         p_hours = st.number_input(label="Hours value for 'P':", min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input")
@@ -200,13 +176,13 @@ else:
 
     start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
 
-    # Construct the tracking dataframe dynamically using live inputs
+    # Construct the tracking dataframe dynamically using calendar limits
     processed_rows = []
     for item in raw_attendance_data:
         m_yr = item.get("month_year") or "N/A"
         row_dt = parse_row_date(m_yr)
         
-        # Cross-reference against calendar boundaries dynamically
+        # Filter rows by calendar input bounds
         if row_dt:
             if not (start_cal <= row_dt <= end_cal):
                 continue
@@ -228,7 +204,6 @@ else:
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
         configured_shift_hours = meta.get("shift_hours", 8.00)
         
-        # Run calculations using auto-computed integer lengths
         if current_status.upper() == "ACTIVE" and total_days_basis > 0:
             per_hour_rate = (configured_monthly_comp / float(total_days_basis)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
