@@ -48,7 +48,8 @@ def update_db_payment_status(employee_id, month_year, new_status):
     payload = {"payment_status": new_status}
     try:
         res = requests.patch(endpoint, headers=HEADERS, json=payload)
-        return res.status_code in
+        # SYNTAX FIX: Successfully matches common REST patch completion standard codes
+        return res.status_code in [200, 201, 204]
     except Exception:
         return False
 
@@ -77,7 +78,7 @@ def get_days_in_month(month_year_str):
     """Extracts actual days available inside specific timeline string as an integer (e.g. 'Oct-2026')"""
     dt = parse_row_date(month_year_str)
     if dt:
-        return int(calendar.monthrange(dt.year, dt.month))
+        return int(calendar.monthrange(dt.year, dt.month)[1])
     return 31
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (FILTERS ENGINE & COMPUTATION MATRIX)
@@ -93,7 +94,7 @@ else:
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
     default_start = past_month_date.replace(day=1)
-    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month))
+    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
 
     # Single calendar input widget setup
     chosen_dates = st.date_input(
@@ -296,7 +297,8 @@ else:
                     for header_item in headers:
                         val = row_data[header_item]
                         val_str = f"{val:.2f}" if isinstance(val, float) else str(val)
-                        row_cells.append(Paragraph(val_str, data_cell_style))
+                        row_data_item = val_str
+                        row_cells.append(Paragraph(row_data_item, data_cell_style))
                     pdf_table_data.append(row_cells)
                 
                 total_cols = len(headers)
