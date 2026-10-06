@@ -158,9 +158,12 @@ else:
             min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input"
         )
     with w_col2:
+        # BUG FIX: Appended search_mat_month to widget key to force live updates on selection change
+        # RENAMED FIELD: Simplified to "Total Days in Selected Month"
         selected_month_days_base = st.number_input(
-            label="Operational Days Base in Selected Month Frame:",
-            min_value=1, max_value=31, value=int(default_days_baseline), step=1, key="month_days_override_input"
+            label="Total Days in Selected Month:",
+            min_value=1, max_value=31, value=int(default_days_baseline), step=1, 
+            key=f"month_days_override_{search_mat_month.replace('-', '_')}"
         )
         
     with mat_col1:
@@ -244,7 +247,6 @@ else:
          "Rate_Per_Hour", "Rate_Per_Minute", "Gross_Payout", "Payment_Status", "Start_Date", "Last_Date", "EMP_Status"]
     )
     
-    # 🛡️ SYSTEM INTEGRITY FIX: Dynamically guarantee index presence before array subset operations
     validated_columns = [col for col in grid_columns_order if col in filtered_df.columns]
     render_df = filtered_df[validated_columns]
 
@@ -290,7 +292,7 @@ else:
     st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
-        st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days Override}}{\\text{Shift Hours} \\times 60}$$")
+        st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Total Days}}{\\text{Shift Hours} \\times 60}$$")
     with f_col2:
         st.info("**2. Total Minutes Processed**\n\n$$\\text{Total Minutes} = \\text{Total Hours Worked} \\times 60$$")
     with f_col3:
