@@ -79,9 +79,57 @@ def get_days_in_month(month_year_str):
         pass
     return 31  # Clean integer standard fallback
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (FILTERS & RENDER ENGINE SETUP)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 & 3 (PROCESSING ENGINE & FILTERS)
 # ============================================================================
 
+st.title("📋 Enterprise Attendance & Workforce Analytics Console")
+st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
+
+# Initialize default fallbacks before parsing loop to prevent race conditions
+p_hours = 8.0
+
+# Load Raw Datasets from Synced Production Pools
+raw_attendance_data = fetch_raw_attendance_feed()
+master_emp_data = fetch_cntr_employee_master()
+
+# Compile Employee Profile Metadata Map directly from cntr_employee_master
+emp_metadata_map = {}
+for emp in master_emp_data:
+    emp_id = emp.get("employee_id")
+    if emp_id:
+        emp_metadata_map[str(emp_id).strip().upper()] = {
+            "start_date": emp.get("start_date") or "N/A",
+            "last_day_of_work": emp.get("last_day_of_work") or "N/A",
+            "employee_status": emp.get("employee_status") or "Active",
+            "comp_monthly": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00,
+            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 8.00,
+            "show_flag": emp.get("show", True)
+        }
+
+def parse_days_to_hours(days_list, p_val):
+    """Evaluates attendance tracking tokens against live configurations dynamically"""
+    calculated_hours = 0.0
+    calculated_days = 0.0
+    for token in days_list:
+        if not token:
+            continue
+        token_str = str(token).strip().upper()
+        if token_str == "P":
+            calculated_hours += p_val
+            calculated_days += 1.0
+        elif token_str == "P4":
+            calculated_hours += 16.0  
+            calculated_days += 1.0
+        elif re.match(r"^\d+(\.\d+)?$", token_str):
+            val = float(token_str)
+            calculated_hours += val
+            if val > 0:
+                calculated_days += 1.0
+    return calculated_hours, calculated_days
+
+# ============================================================================
+# RENDERING INTERFACE CONDITIONAL PIPELINE
+# ============================================================================
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
@@ -110,7 +158,7 @@ else:
             min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input"
         )
     with w_col2:
-        # Enforced whole integers by removing decimals from value and step configurations
+        # Enforced whole integers by removing decimals
         selected_month_days_base = st.number_input(
             label="Operational Days Base in Selected Month Frame:",
             min_value=1, max_value=31, value=int(default_days_baseline), step=1, key="month_days_override_input"
@@ -146,19 +194,17 @@ else:
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
         configured_shift_hours = meta.get("shift_hours", 8.00)
         
-        # Payroll calculations using integer days
+        # Payroll calculations using integer days baseline
         if current_status.upper() == "ACTIVE" and selected_month_days_base > 0:
             per_hour_rate = (configured_monthly_comp / float(selected_month_days_base)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
             calculated_gross_payout = per_hour_rate * total_hours_worked
             total_minutes_worked = total_hours_worked * 60.0
-            calculated_gross_payout_min = total_minutes_worked * per_minute_rate
         else:
             per_hour_rate = 0.00
             per_minute_rate = 0.00
             calculated_gross_payout = 0.00
             total_minutes_worked = 0.00
-            calculated_gross_payout_min = 0.00
 
         row_dict = {
             "Month_Year": m_yr, "EMP_ID": item.get("employee_id") or "N/A", "EMP_Name": item.get("employee_name") or "Unnamed",
@@ -166,7 +212,7 @@ else:
             "Total_Hours": total_hours_worked, "Total_Minutes": total_minutes_worked, "Total_Days": total_days_worked,
             "Start_Date": meta.get("start_date", "N/A"), "Last_Date": meta.get("last_day_of_work", "N/A"), "EMP_Status": current_status,
             "Base_Monthly_Comp": configured_monthly_comp, "Rate_Per_Hour": per_hour_rate, "Rate_Per_Minute": per_minute_rate,
-            "Gross_Payout": calculated_gross_payout, "Gross_Payout_Min": calculated_gross_payout_min,
+            "Gross_Payout": calculated_gross_payout,
             "Payment_Status": item.get("payment_status") or "Pending", "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
         }
         for day in range(1, 32):
