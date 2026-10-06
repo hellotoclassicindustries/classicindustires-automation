@@ -65,7 +65,7 @@ def update_db_payment_status(employee_id, month_year, new_status):
         return False
 
 def parse_row_date(month_year_str):
-    """Maps custom string variations like 'September-2026' or '09-2026' to a proper datetime.date object"""
+    """Maps custom database string metrics directly into true datetime.date objects for sorting"""
     if not month_year_str or str(month_year_str).strip() == "N/A":
         return None
     normalized = str(month_year_str).strip().replace("/", "-")
@@ -133,86 +133,82 @@ def parse_days_to_hours(days_list, p_val):
                 calculated_days += 1.0
     return calculated_hours, calculated_days
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (CALENDAR SYSTEM FILTERS & DATAFRAME ASSEMBLY)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (TRUE CALENDAR WIDGET & RANGE CONTROLS)
 # ============================================================================
 
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
     st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
-    st.markdown("##### **📅 Interactive Calendar Filter Panel**")
+    st.markdown("##### **📅 Advanced Calendar Preset Options**")
     
-    # Render Smart Preset Options row
-    pre_col1, pre_col2 = st.columns([2, 2])
     today = datetime.date.today()
     
-    with pre_col1:
-        date_shortcut = st.selectbox(
-            "Quick Date Shortcuts Selector:",
-            options=["This Month", "Past Month", "3 Months Before", "Custom Date Range", "View All Records"],
-            key="date_shortcut_preset"
-        )
-        
-    # Process shortcut timestamps deterministically 
-    if date_shortcut == "This Month":
-        start_cal_date = today.replace(day=1)
-        end_cal_date = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-    elif date_shortcut == "Past Month":
-        prev_m = today - relativedelta(months=1)
-        start_cal_date = prev_m.replace(day=1)
-        end_cal_date = prev_m.replace(day=calendar.monthrange(prev_m.year, prev_m.month)[1])
-    elif date_shortcut == "3 Months Before":
-        three_m_ago = today - relativedelta(months=3)
-        start_cal_date = three_m_ago.replace(day=1)
-        end_cal_date = three_m_ago.replace(day=calendar.monthrange(three_m_ago.year, three_m_ago.month)[1])
+    # Render interactive button bar row
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+    
+    # Initialize session tracking range fallbacks safely
+    if "cal_start_date" not in st.session_state or "cal_end_date" not in st.session_state:
+        st.session_state["cal_start_date"] = today.replace(day=1)
+        st.session_state["cal_end_date"] = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+
+    with btn_col1:
+        if st.button("🗓️ This Month", use_container_width=True):
+            st.session_state["cal_start_date"] = today.replace(day=1)
+            st.session_state["cal_end_date"] = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    with btn_col2:
+        if st.button("⏮️ Past Month", use_container_width=True):
+            prev_m = today - relativedelta(months=1)
+            st.session_state["cal_start_date"] = prev_m.replace(day=1)
+            st.session_state["cal_end_date"] = prev_m.replace(day=calendar.monthrange(prev_m.year, prev_m.month)[1])
+    with btn_col3:
+        if st.button("⏳ 3 Months Before", use_container_width=True):
+            three_m = today - relativedelta(months=3)
+            st.session_state["cal_start_date"] = three_m.replace(day=1)
+            st.session_state["cal_end_date"] = three_m.replace(day=calendar.monthrange(three_m.year, three_m.month)[1])
+    with btn_col4:
+        if st.button("🌐 Reset / View All", use_container_width=True):
+            st.session_state["cal_start_date"] = today - relativedelta(years=2)
+            st.session_state["cal_end_date"] = today + relativedelta(years=2)
+
+    # TRUE CALENDAR PICKER: Renders single graphical standard input
+    chosen_dates = st.date_input(
+        "Refine Target Range from Calendar View:",
+        value=(st.session_state["cal_start_date"], st.session_state["cal_end_date"]),
+        key="main_graphical_calendar_picker"
+    )
+
+    # Safely unpack calendar ranges
+    if isinstance(chosen_dates, tuple) and len(chosen_dates) == 2:
+        start_cal, end_cal = chosen_dates
     else:
-        # Default boundary initialization for open-ended tracking
-        start_cal_date = today - relativedelta(years=2)
-        end_cal_date = today + relativedelta(years=2)
+        start_cal, end_cal = st.session_state["cal_start_date"], st.session_state["cal_end_date"]
 
-    with pre_col2:
-        if date_shortcut == "Custom Date Range":
-            custom_range = st.date_input(
-                "Select Custom Start & End Dates:",
-                value=(today.replace(day=1), today),
-                key="custom_calendar_picker"
-            )
-            if isinstance(custom_range, tuple) and len(custom_range) == 2:
-                start_cal_date, end_cal_date = custom_range
-        elif date_shortcut == "View All Records":
-            st.info("Showing all historical rows without time range clipping.")
-        else:
-            st.info(f"🗓️ Auto-selected Range: **{start_cal_date}** to **{end_cal_date}**")
+    # Calculate absolute count of whole numbers automatically
+    total_days_basis = int((end_cal - start_cal).days) + 1
+    if total_days_basis <= 0:
+        total_days_basis = 30
 
-    # Clean Integer Math Day Tracker
-    total_days_in_selection = int((end_cal_date - start_cal_date).days) + 1
-    if date_shortcut == "View All Records":
-        total_days_in_selection = 30  # Smooth baseline math fallback if no specific timeframe is applied
-
-    st.markdown("##### **⚙️ Live Operational Weights & Text Search Fields**")
-    w_col1, w_col2 = st.columns(2)
-    with w_col1:
-        p_hours = st.number_input(label="Hours value for 'P' (Base Present):", min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input")
-    with w_col2:
-        st.success(f"🔢 **Calculated Payout Day Divider Basis:** Whole Count equals **{total_days_in_selection} Days**")
-
+    # Layout search strings row
     mat_col1, mat_col2, mat_col4 = st.columns(3)
     with mat_col1:
-        search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
+        p_hours = st.number_input(label="Hours value for 'P':", min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input")
     with mat_col2:
-        search_mat_name = st.text_input("Filter Ledger by Employee Name:", "", key="mat_name_input").strip()
+        search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
     with mat_col4:
-        search_mat_status = st.selectbox("Filter Ledger by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
+        search_mat_status = st.selectbox("Filter by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
 
-    # Construct tracking rows applying calendar limits
+    start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
+
+    # Construct the tracking dataframe dynamically using live inputs
     processed_rows = []
     for item in raw_attendance_data:
         m_yr = item.get("month_year") or "N/A"
         row_dt = parse_row_date(m_yr)
         
-        # Check calendar window constraints if "View All Records" shortcut isn't active
-        if date_shortcut != "View All Records" and row_dt:
-            if not (start_cal_date <= row_dt <= end_cal_date):
+        # Cross-reference against calendar boundaries dynamically
+        if row_dt:
+            if not (start_cal <= row_dt <= end_cal):
                 continue
                 
         days_list = item.get("attendance_days") or []
@@ -232,9 +228,9 @@ else:
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
         configured_shift_hours = meta.get("shift_hours", 8.00)
         
-        # Payroll rate logic using dynamic integer selection lengths
-        if current_status.upper() == "ACTIVE" and total_days_in_selection > 0:
-            per_hour_rate = (configured_monthly_comp / float(total_days_in_selection)) / configured_shift_hours
+        # Run calculations using auto-computed integer lengths
+        if current_status.upper() == "ACTIVE" and total_days_basis > 0:
+            per_hour_rate = (configured_monthly_comp / float(total_days_basis)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
             calculated_gross_payout = per_hour_rate * total_hours_worked
             total_minutes_worked = total_hours_worked * 60.0
@@ -263,22 +259,21 @@ else:
 # ============================================================================
 
     if df.empty:
-        st.warning("⚠️ No records matched the selected calendar date range filter constraint layout criteria.")
+        st.warning("⚠️ No operational records match the active date window boundaries selected.")
     else:
-        # Apply search string restrictions
+        # Apply filter conditions
         filtered_df = df[df["DB_Show_Flag"] == True].copy()
         if search_mat_id:
             filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_mat_id, case=False, na=False)]
-        if search_mat_name:
-            filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_mat_name, case=False, na=False)]
         if search_mat_status == "Active Only":
             filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "ACTIVE"]
         elif search_mat_status == "In-Active Only":
             filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
 
-        # Default day column display setups
+        selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
+        
         grid_columns_order = (
-            ["Month_Year", "EMP_ID", "EMP_Name"] + [f"D{d:02d}" for d in range(1, 32)] + 
+            ["Month_Year", "EMP_ID", "EMP_Name"] + selected_day_cols + 
             ["Over_Time", "Less_Time", "Total_Hours", "Total_Minutes", "Total_Days", "Base_Monthly_Comp", 
              "Rate_Per_Hour", "Rate_Per_Minute", "Gross_Payout", "Payment_Status", "Start_Date", "Last_Date", "EMP_Status"]
         )
@@ -302,10 +297,9 @@ else:
             "Payment_Status": st.column_config.SelectboxColumn("Payment Status", width="medium", options=["Pending", "Done"], required=True),
             "EMP_Status": st.column_config.TextColumn("EMP Status", width="small", disabled=True)
         }
-        for d in range(1, 32):
-            d_col = f"D{d:02d}"
+        for d_col in selected_day_cols:
             if d_col in validated_columns:
-                cfg[d_col] = st.column_config.TextColumn(str(d), width=45, disabled=True)
+                cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
 
         edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
 
