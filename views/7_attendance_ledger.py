@@ -74,12 +74,12 @@ def get_days_in_month(month_year_str):
             else:
                 m_num = int(parts[0])
                 year = int(parts[1])
-            return int(calendar.monthrange(year, m_num)[1])
+            return int(calendar.monthrange(year, m_num))
     except:
         pass
     return 31  # Clean integer standard fallback
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 & 3 (PROCESSING ENGINE & FILTERS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (INITIAL DATA PROCESSING LOOP)
 # ============================================================================
 
 st.title("📋 Enterprise Attendance & Workforce Analytics Console")
@@ -126,10 +126,10 @@ def parse_days_to_hours(days_list, p_val):
             if val > 0:
                 calculated_days += 1.0
     return calculated_hours, calculated_days
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (FILTERS & RENDER ENGINE SETUP)
+# ============================================================================
 
-# ============================================================================
-# RENDERING INTERFACE CONDITIONAL PIPELINE
-# ============================================================================
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
@@ -158,7 +158,6 @@ else:
             min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input"
         )
     with w_col2:
-        # Enforced whole integers by removing decimals
         selected_month_days_base = st.number_input(
             label="Operational Days Base in Selected Month Frame:",
             min_value=1, max_value=31, value=int(default_days_baseline), step=1, key="month_days_override_input"
@@ -238,149 +237,16 @@ else:
         filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
 
     selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
-    grid_columns_order = (
-        ["Month_Year", "EMP_ID", "EMP_Name"] + selected_day_cols + 
-        ["Over_Time", "Less_Time", "Total_Hours", "Total_Minutes", "Total_Days", "Base_Monthly_Comp", 
-         "Rate_Per_Hour", "Rate_Per_Minute", "Gross_Payout", "Gross_Payout_Min", "Payment_Status", "Start_Date", "Last_Date", "EMP_Status"]
-    )
-    render_df = filtered_df[grid_columns_order]
-
-    cfg = {
-        "Month_Year": st.column_config.TextColumn("Month_Year", width="small", disabled=True),
-        "EMP_ID": st.column_config.TextColumn("EMP ID", width="small", disabled=True),
-        "EMP_Name": st.column_config.TextColumn("Employee Name", width="medium", disabled=True),
-        "Over_Time": st.column_config.NumberColumn("Extra Hrs", format="%.2f", width="small", disabled=True),
-        "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small", disabled=True),
-        "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small", disabled=True),
-        "Total_Minutes": st.column_config.NumberColumn("Total Min", format="%.0f", width="small", disabled=True),
-        "Total_Days": st.column_config.NumberColumn("Total Days", format="%.1f", width="small", disabled=True),
-        "Base_Monthly_Comp": st.column_config.NumberColumn("Base Comp Rate", format="₹%.2f", width="small", disabled=True),
-        "Rate_Per_Hour": st.column_config.NumberColumn("Hourly Rate", format="₹%.2f", width="small", disabled=True),
-        "Rate_Per_Minute": st.column_config.NumberColumn("Per Min Rate", format="₹%.4f", width="small", disabled=True),
-        "Gross_Payout": st.column_config.NumberColumn("Gross (Hrs)", format="₹%.2f", width="medium", disabled=True),
-        "Gross_Payout_Min": st.column_config.NumberColumn("Gross Payout (Min)", format="₹%.2f", width="medium", disabled=True),
-        "Payment_Status": st.column_config.SelectboxColumn("Payment Status", width="medium", options=["Pending", "Done"], required=True),
-        "EMP_Status": st.column_config.TextColumn("EMP Status", width="small", disabled=True)
-    }
-    for d_col in selected_day_cols:
-        cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
-
-    edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
-
-    if st.session_state.attendance_ledger_data_editor.get("edited_rows"):
-        modifications = st.session_state.attendance_ledger_data_editor["edited_rows"]
-        for numeric_index_str, altered_props in modifications.items():
-            row_idx = int(numeric_index_str)
-            if "Payment_Status" in altered_props:
-                target_emp = render_df.iloc[row_idx]["EMP_ID"]
-                target_month = render_df.iloc[row_idx]["Month_Year"]
-                updated_val = altered_props["Payment_Status"]
-                
-                with st.spinner(f"Updating status for {target_emp}..."):
-                    if update_db_payment_status(target_emp, target_month, updated_val):
-                        st.success(f"✓ Synchronised Ledger Row status to '{updated_val}' for Employee ID: {target_emp}")
-                        st.cache_data.clear()
-                        st.rerun()
-
-    # Formulas Reference block
-    st.html("<hr>")
-    st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
-    f_col1, f_col2, f_col3 = st.columns(3)
-    with f_col1:
-        st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days Override}}{\\text{Shift Hours} \\times 60}$$")
-    with f_col2:
-        st.info("**2. Total Minutes Processed**\n\n$$\\text{Total Minutes} = \\text{Total Hours Worked} \\times 60$$")
-    with f_col3:
-        st.info("**3. Minute-Based Gross Payout**\n\n$$\\text{Gross Payout (Min)} = \\text{Total Minutes} \\times \\text{Rate per Min}$$")
-    st.html("<hr>")
-
-    # 📥 Original Data Export Buffers (Completely Unaltered)
-    st.markdown("#### 📥 Export Historical Attendance Matrix Ledger")
-    down_col1, down_col2 = st.columns(2)
     
-    with down_col1:
-        csv_df = edited_df.copy()
-        for col in csv_df.columns:
-            if col.startswith("D") and col[1:].isdigit():
-                csv_df[col] = csv_df[col].apply(lambda x: f"\t{x}" if (isinstance(x, str) and "/" in x) else x)
-        csv_buffer = io.StringIO()
-        csv_df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            label="📊 Download Ledger as CSV (Preserve Formats)", data=csv_buffer.getvalue(),
-            file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.csv", mime="text/csv", key="ledger_csv_download_btn"
-        )
-        
-    with down_col2:
-        def generate_ledger_matrix_pdf(dataframe):
-            pdf_buffer = io.BytesIO()
-            document = SimpleDocTemplate(pdf_buffer, pagesize=landscape(letter), rightMargin=20, leftMargin=20, topMargin=30, bottomMargin=30)
-            story_components = []
-            pdf_styles = getSampleStyleSheet()
-            title_text_style = ParagraphStyle('LedgerTitleStyle', parent=pdf_styles['Heading1'], fontSize=14, leading=18, textColor=colors.HexColor("#1A365D"), alignment=0)
-            header_cell_style = ParagraphStyle('LedgerHeaderStyle', parent=pdf_styles['Normal'], fontSize=6, leading=8, textColor=colors.white, fontName="Helvetica-Bold")
-            data_cell_style = ParagraphStyle('LedgerDataStyle', parent=pdf_styles['Normal'], fontSize=5, leading=7, textColor=colors.black)
-            
-            story_components.append(Paragraph("Main Historical Attendance Matrix Ledger", title_text_style))
-            story_components.append(Spacer(1, 10))
-            headers = list(dataframe.columns)
-            pdf_table_data = [[Paragraph(f"<b>{h}</b>", header_cell_style) for h in headers]]
-            
-            for _, row_data in dataframe.iterrows():
-                row_cells = []
-                for header_item in headers:
-                    val = row_data[header_item]
-                    val_str = f"{val:.2f}" if isinstance(val, float) else str(val)
-                    row_cells.append(Paragraph(val_str, data_cell_style))
-                pdf_table_data.append(row_cells)
-            
-            total_cols = len(headers)
-            available_width = 752  
-            column_width = max(20, available_width / total_cols)
-            matrix_table = Table(pdf_table_data, colWidths=[column_width]*total_cols, repeatRows=1)
-            matrix_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2B6CB0")), ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('GRID', (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E0")),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7FAFC")]),
-                ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ]))
-            story_components.append(matrix_table)
-            document.build(story_components)
-            pdf_buffer.seek(0)
-            return pdf_buffer.getvalue()
-
-        if not edited_df.empty:
-            st.download_button(
-                label="📄 Download Ledger as PDF (Landscape)", data=generate_ledger_matrix_pdf(edited_df),
-                file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.pdf", mime="application/pdf", key="ledger_pdf_download_btn"
-            )
-        else:
-            st.button("📄 Download Ledger as PDF (Landscape)", disabled=True)
-# ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 (DATA EDITORS & RAW EXPORT DRIVERS)
-# ============================================================================
-
-    # Apply structural queries constraints
-    filtered_df = df[df["DB_Show_Flag"] == True].copy()
-    if search_mat_id:
-        filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_mat_id, case=False, na=False)]
-    if search_mat_name:
-        filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_mat_name, case=False, na=False)]
-    if search_mat_month != "All Months":
-        filtered_df = filtered_df[filtered_df["Month_Year"] == search_mat_month]
-    if search_mat_status == "Active Only":
-        filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "ACTIVE"]
-    elif search_mat_status == "In-Active Only":
-        filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
-
-    selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
-    
-    # CONSOLIDATION FIX: Gross_Payout_Min removed; Gross_Payout represents the final computed baseline
     grid_columns_order = (
         ["Month_Year", "EMP_ID", "EMP_Name"] + selected_day_cols + 
         ["Over_Time", "Less_Time", "Total_Hours", "Total_Minutes", "Total_Days", "Base_Monthly_Comp", 
          "Rate_Per_Hour", "Rate_Per_Minute", "Gross_Payout", "Payment_Status", "Start_Date", "Last_Date", "EMP_Status"]
     )
-    render_df = filtered_df[grid_columns_order]
+    
+    # 🛡️ SYSTEM INTEGRITY FIX: Dynamically guarantee index presence before array subset operations
+    validated_columns = [col for col in grid_columns_order if col in filtered_df.columns]
+    render_df = filtered_df[validated_columns]
 
     cfg = {
         "Month_Year": st.column_config.TextColumn("Month_Year", width="small", disabled=True),
@@ -399,7 +265,8 @@ else:
         "EMP_Status": st.column_config.TextColumn("EMP Status", width="small", disabled=True)
     }
     for d_col in selected_day_cols:
-        cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
+        if d_col in validated_columns:
+            cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
 
     edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
 
