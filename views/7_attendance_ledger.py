@@ -30,7 +30,7 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-@st.cache_data(ttl=2)
+@st.sidebar.cache_data(ttl=2)
 def fetch_raw_attendance_feed():
     """Fetches full attendance matrix from Supabase public.raw_attendance_feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?order=month_year.desc,employee_id.asc"
@@ -42,7 +42,7 @@ def fetch_raw_attendance_feed():
     except Exception:
         return []
 
-@st.cache_data(ttl=15)
+@st.sidebar.cache_data(ttl=15)
 def fetch_cntr_employee_master():
     """Queries production employee metadata profile registries"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/cntr_employee_master?order=employee_id.asc"
@@ -84,18 +84,25 @@ def parse_row_date(month_year_str):
         if 1 <= m_val <= 12:
             return datetime.date(year, m_val, 1)
     return None
+
+def get_days_in_month(month_year_str):
+    """Extracts actual days available inside specific timeline string as an integer (e.g. 'Oct-2026')"""
+    dt = parse_row_date(month_year_str)
+    if dt:
+        return int(calendar.monthrange(dt.year, dt.month)[1])
+    return 31
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (INITIAL DATA PROCESSING LOOP)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (INITIAL DATA METADATA EXTRACTION)
 # ============================================================================
 
-# Initialize default fallback hours for the P token
-p_hours = 8.0
+st.title("📋 Enterprise Attendance & Workforce Analytics Console")
+st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
 
 # Load Raw Datasets from Synced Production Pools
 raw_attendance_data = fetch_raw_attendance_feed()
 master_emp_data = fetch_cntr_employee_master()
 
-# Compile Employee Profile Metadata Map directly from cntr_employee_master
+# Compile Employee Profile Metadata Map directly from authority registries
 emp_metadata_map = {}
 for emp in master_emp_data:
     emp_id = emp.get("employee_id")
@@ -105,30 +112,54 @@ for emp in master_emp_data:
             "last_day_of_work": emp.get("last_day_of_work") or "N/A",
             "employee_status": emp.get("employee_status") or "Active",
             "comp_monthly": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00,
-            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 8.00,
+            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
             "show_flag": emp.get("show", True)
         }
 
-def parse_days_to_hours(days_list, p_val):
-    """Evaluates attendance tracking tokens against live configurations dynamically"""
-    calculated_hours = 0.0
-    calculated_days = 0.0
+def evaluate_attendance_tokens_fallback(days_list, base_shift):
+    """
+    BACKUP ENGINE ONLY: Runs calculations from character array tokens 
+    ONLY if database columns for total_hours or total_days are completely empty.
+    """
+    total_hours = 0.0
+    proportional_days = 0.0
+    
     for token in days_list:
         if not token:
             continue
-        token_str = str(token).strip().upper()
-        if token_str == "P":
-            calculated_hours += p_val
-            calculated_days += 1.0
-        elif token_str == "P4":
-            calculated_hours += 16.0  
-            calculated_days += 1.0
-        elif re.match(r"^\d+(\.\d+)?$", token_str):
-            val = float(token_str)
-            calculated_hours += val
-            if val > 0:
-                calculated_days += 1.0
-    return calculated_hours, calculated_days
+        clean = str(token).strip().upper()
+        
+        if clean == "" or clean == "A":
+            hours_today = 0.0
+        elif clean == "P":
+            hours_today = base_shift
+        elif re.match(r"^\d+$", clean):
+            hours_today = float(clean)
+        elif "/" in clean:
+            try:
+                parts = clean.split("/")
+                hours_today = float(parts[0]) + (float(parts[1]) / 60.0)
+            except:
+                hours_today = 0.0
+        elif "P" in clean:
+            try:
+                numeric_extracted = re.sub(r"[^0-9.]", "", clean)
+                overtime_val = float(numeric_extracted) if numeric_extracted else 0.0
+                hours_today = base_shift + overtime_val
+            except:
+                hours_today = base_shift
+        else:
+            try:
+                numeric_extracted = re.sub(r"[^0-9.]", "", clean)
+                hours_today = float(numeric_extracted) if numeric_extracted else 0.0
+            except:
+                hours_today = 0.0
+                
+        total_hours += hours_today
+        if base_shift > 0 and hours_today > 0:
+            proportional_days += (hours_today / base_shift)
+            
+    return round(total_hours, 2), round(proportional_days, 2)
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (CALENDAR SYSTEM FILTERS & DATAFRAME ASSEMBLY)
 # ============================================================================
@@ -136,44 +167,34 @@ def parse_days_to_hours(days_list, p_val):
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
-    # 📆 CALCULATE PAST MONTH WITH PROPER TUPLE INDEXING
+    # Calculate previous calendar month parameters automatically
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
-    
-    # FIX: Added [1] index to pull out only the total number of days integer from the monthrange tuple
     default_start = past_month_date.replace(day=1)
     default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
 
-    # Single Calendar Picker: Automatically defaults to previous-month range parameters
+    # Single Calendar input widget setup
     chosen_dates = st.date_input(
         "Select Payout Month:",
         value=(default_start, default_end),
         key="main_graphical_calendar_picker"
     )
 
-    # Safely unpack calendar range adjustments
     if isinstance(chosen_dates, tuple) and len(chosen_dates) == 2:
         start_cal, end_cal = chosen_dates
     else:
         start_cal, end_cal = default_start, default_end
 
-    # Calculate selection lengths silently behind the scenes
-    total_days_basis = int((end_cal - start_cal).days) + 1
-    if total_days_basis <= 0:
-        total_days_basis = 30
-
-    # Layout search fields row
-    mat_col1, mat_col2, mat_col4 = st.columns(3)
+    # Layout filter fields row
+    mat_col1, mat_col4 = st.columns(2)
     with mat_col1:
-        p_hours = st.number_input(label="Hours value for 'P':", min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input")
-    with mat_col2:
         search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
     with mat_col4:
         search_mat_status = st.selectbox("Filter by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
 
     start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
 
-    # Construct the tracking dataframe dynamically using calendar limits
+    # Construct tracking rows prioritizing maximum database data usage
     processed_rows = []
     for item in raw_attendance_data:
         m_yr = item.get("month_year") or "N/A"
@@ -188,7 +209,7 @@ else:
         emp_id_str = str(item.get("employee_id") or "").strip().upper()
         meta = emp_metadata_map.get(emp_id_str, {
             "start_date": "N/A", "last_day_of_work": "N/A", "employee_status": "Active",
-            "comp_monthly": 0.00, "shift_hours": 8.00
+            "comp_monthly": 0.00, "shift_hours": 12.00
         })
         
         def safe_float(val):
@@ -196,19 +217,30 @@ else:
             try: return float(val)
             except: return 0.00
 
-        total_hours_worked, total_days_worked = parse_days_to_hours(days_list, p_hours)
+        # PRIORITIZE DB COLUMNS: Read pre-calculated records straight from DB columns
+        db_hours = safe_float(item.get("total_hours"))
+        db_days = safe_float(item.get("total_days"))
+        
         current_status = meta.get("employee_status", "Active")
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
-        configured_shift_hours = meta.get("shift_hours", 8.00)
+        configured_shift_hours = meta.get("shift_hours", 12.00)
         
-        # Behind-the-scenes calendar mapping logic fixes decimal constraints automatically
-        row_month_days = calendar.monthrange(row_dt.year, row_dt.month)[1] if row_dt else total_days_basis
+        # Safe Fallback Engine: Runs calculations *only* if DB field values are absent
+        if db_hours <= 0.0 or db_days <= 0.0:
+            total_hours_worked, total_days_worked = evaluate_attendance_tokens_fallback(days_list, configured_shift_hours)
+        else:
+            total_hours_worked = db_hours
+            total_days_worked = db_days
+            
+        overtime_hours = safe_float(item.get("over_time"))
+        lesstime_hours = safe_float(item.get("less_time"))
+        row_month_days = get_days_in_month(m_yr)
 
-        # Payroll calculations
+        # In-Memory Payroll rate engine execution
         if current_status.upper() == "ACTIVE" and row_month_days > 0:
             per_hour_rate = (configured_monthly_comp / float(row_month_days)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
-            calculated_gross_payout = per_hour_rate * total_hours_worked
+            calculated_gross_payout = total_hours_worked * 60.0 * per_minute_rate
             total_minutes_worked = total_hours_worked * 60.0
         else:
             per_hour_rate = 0.00
@@ -218,7 +250,7 @@ else:
 
         row_dict = {
             "Month_Year": m_yr, "EMP_ID": item.get("employee_id") or "N/A", "EMP_Name": item.get("employee_name") or "Unnamed",
-            "Over_Time": safe_float(item.get("over_time")), "Less_Time": safe_float(item.get("less_time")),
+            "Over_Time": overtime_hours, "Less_Time": lesstime_hours,
             "Total_Hours": total_hours_worked, "Total_Minutes": total_minutes_worked, "Total_Days": total_days_worked,
             "Start_Date": meta.get("start_date", "N/A"), "Last_Date": meta.get("last_day_of_work", "N/A"), "EMP_Status": current_status,
             "Base_Monthly_Comp": configured_monthly_comp, "Rate_Per_Hour": per_hour_rate, "Rate_Per_Minute": per_minute_rate,
@@ -231,7 +263,7 @@ else:
         
     df = pd.DataFrame(processed_rows)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 (DATA EDITORS & RAW EXPORT DRIVERS)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 4A (TABLE GRAPHICS ENGINE)
 # ============================================================================
 
     if df.empty:
@@ -248,6 +280,7 @@ else:
 
         selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
         
+        # Grid column order setup
         grid_columns_order = (
             ["Month_Year", "EMP_ID", "EMP_Name"] + selected_day_cols + 
             ["Over_Time", "Less_Time", "Total_Hours", "Total_Minutes", "Total_Days", "Base_Monthly_Comp", 
@@ -278,7 +311,11 @@ else:
                 cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
 
         edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 4B (SYNC, FORMULAS & EXPORTS)
+# ============================================================================
 
+        # Detect modifications and execute dynamic database updates
         if st.session_state.attendance_ledger_data_editor.get("edited_rows"):
             modifications = st.session_state.attendance_ledger_data_editor["edited_rows"]
             for numeric_index_str, altered_props in modifications.items():
@@ -299,14 +336,37 @@ else:
         st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
         f_col1, f_col2, f_col3 = st.columns(3)
         with f_col1:
-            st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days Delta Count}}{\\text{Shift Hours} \\times 60}$$")
+            st.info("**1. Per Minute Rate Engine**\n\n\[\text{Rate per Min} = \frac{\text{Base Monthly Comp} / \text{Days in Month}}{\text{Shift Hours} \times 60}\]")
         with f_col2:
-            st.info("**2. Total Minutes Processed**\n\n$$\\text{Total Minutes} = \\text{Total Hours Worked} \\times 60$$")
+            st.info("**2. Total Minutes Sourced**\n\n\[\text{Total Minutes} = \text{Total Hours (From DB)} \times 60\]")
         with f_col3:
-            st.info("**3. Consolidated Gross Payout**\n\n$$\\text{Gross Payout} = \\text{Total Minutes} \\times \\text{Rate per Min}$$")
+            st.info("**3. Consolidated Gross Payout**\n\n\[\text{Gross Payout} = \text{Total Minutes} \times \text{Rate per Min}\]")
+            
+        # Expandable Breakdown Section
+        with st.expander("🔍 Click to view Fractional Shift Conversion and Payout Example (e.g. '11/30')"):
+            st.markdown("""
+            When processing complex shorthand strings in memory (e.g., if a record column value needs fallback processing), fractional time tokens split hour and minute indices using the `/` parameter:
+            
+            ##### **Step A: Hour Conversion Formula**
+            \[\text{Decimal Hours} = \text{Hours Component} + \left( \frac{\text{Minutes Component}}{60} \right)\]
+            
+            * **Example Token Entry:** `11/30`
+            * **Calculation:** \[11 + \left( \frac{30}{60} \right) = 11 + 0.50 = \mathbf{11.50\text{ Hours}}\]
+            
+            ##### **Step B: Practical Payout Example Match**
+            Let's trace a concrete payout calculation using an active employee profile:
+            * **Employee Profile parameters:** Monthly Base Salary = **₹30,000**, Contracted Shift Target = **12 Hours**, Month = **September (30 Days)**.
+            * **Total Hours Worked (From DB or Fallback):** Assume an employee logs exactly one `11/30` shift in the entire month frame (**11.50 Hours total**).
+            
+            1. **Daily Wage Base Rate:** \[₹30,000 / 30 \text{ Days} = ₹1,000 \text{ per day}\]
+            2. **Hourly Wage Base Rate:** \[₹1,000 / 12 \text{ Shift Hours} = ₹83.3333 \text{ per hour}\]
+            3. **Per Minute Wage Base Rate:** \[₹83.3333 / 60 \text{ Minutes} = \mathbf{₹1.3889\text{ per minute}}\]
+            4. **Convert Total Time to Minutes:** \[11.50 \text{ Hours} \times 60 \text{ Minutes} = \mathbf{690\text{ Minutes}}\]
+            5. **Final Gross Payout calculation Result:** \[690 \text{ Minutes} \times ₹1.3889 = \mathbf{₹958.33}\]
+            """)
         st.html("<hr>")
 
-        # 📥 Original Data Export Buffers (Completely Unaltered)
+        # 📥 Original Data Export Workspace (Completely Unaltered)
         st.markdown("#### 📥 Export Historical Attendance Matrix Ledger")
         down_col1, down_col2 = st.columns(2)
         
