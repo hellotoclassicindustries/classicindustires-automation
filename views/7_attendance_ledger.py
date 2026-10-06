@@ -94,7 +94,7 @@ def get_days_in_month(month_year_str):
         return int(calendar.monthrange(dt.year, dt.month)[1])
     return 31
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (MASTER INGESTION & PROCESSING ENGINES)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (CORRECTED CODES PARSING HIERARCHY)
 # ============================================================================
 
 # Load Raw Datasets from Synced Production Pools
@@ -111,14 +111,15 @@ for emp in master_emp_data:
             "last_day_of_work": emp.get("last_day_of_work") or "N/A",
             "employee_status": emp.get("employee_status") or "Active",
             "comp_monthly": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00,
-            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 12.00,
+            # Pulls their true contract base (e.g., 8.00 or 12.00) straight from master DB profile
+            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 8.00,
             "show_flag": emp.get("show", True)
         }
 
 def evaluate_attendance_tokens_fallback(days_list, base_shift):
     """
-    BACKUP ENGINE ONLY: Runs calculations from character array tokens 
-    ONLY if database columns for total_hours or total_days are completely empty.
+    CORRECTED ATTENDANCE TOKEN ENGINE:
+    Evaluates shift tokens dynamically based on the employee's master contract base shift.
     """
     total_hours = 0.0
     proportional_days = 0.0
@@ -140,6 +141,9 @@ def evaluate_attendance_tokens_fallback(days_list, base_shift):
                 hours_today = float(parts[0]) + (float(parts[1]) / 60.0)
             except:
                 hours_today = 0.0
+        # DYNAMIC FIX: P4 now adds exactly 4 hours of overtime to their true contract base shift
+        elif clean == "P4":
+            hours_today = base_shift + 4.0
         elif "P" in clean:
             try:
                 numeric_extracted = re.sub(r"[^0-9.]", "", clean)
