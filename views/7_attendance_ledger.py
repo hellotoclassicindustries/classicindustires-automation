@@ -138,18 +138,26 @@ else:
     st.markdown("##### **🔍 Search Filters & Range Sub-Truncations**")
     mat_col1, mat_col2, mat_col3, mat_col4 = st.columns(4)
     
-    # Comprehensive unique month compilation out of the active data stream pool
     available_months_list = sorted(list({item.get("month_year") for item in raw_attendance_data if item.get("month_year")}))
     
     with mat_col3:
         search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + available_months_list, key="mat_month_input")
     
-    # Clean Integer Default Picker
+    # Clean Integer Default Picker calculation
     if search_mat_month == "All Months":
         default_days_baseline = 31
     else:
         default_days_baseline = get_days_in_month(search_mat_month)
         
+    # State tracking logic to fix persistent value issue across dropdown selections
+    if "previous_selected_month" not in st.session_state:
+        st.session_state["previous_selected_month"] = search_mat_month
+        st.session_state["month_days_override_input"] = int(default_days_baseline)
+        
+    if st.session_state["previous_selected_month"] != search_mat_month:
+        st.session_state["previous_selected_month"] = search_mat_month
+        st.session_state["month_days_override_input"] = int(default_days_baseline)
+
     st.markdown("##### **⚙️ Live Operational & Payroll Rules**")
     w_col1, w_col2 = st.columns(2)
     with w_col1:
@@ -158,12 +166,11 @@ else:
             min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input"
         )
     with w_col2:
-        # BUG FIX: Appended search_mat_month to widget key to force live updates on selection change
-        # RENAMED FIELD: Simplified to "Total Days in Selected Month"
+        # Read/Write live via explicit session state targeting to guarantee dynamic calculation update rules
         selected_month_days_base = st.number_input(
             label="Total Days in Selected Month:",
-            min_value=1, max_value=31, value=int(default_days_baseline), step=1, 
-            key=f"month_days_override_{search_mat_month.replace('-', '_')}"
+            min_value=1, max_value=31, step=1,
+            key="month_days_override_input"
         )
         
     with mat_col1:
