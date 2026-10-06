@@ -64,7 +64,7 @@ def update_db_payment_status(employee_id, month_year, new_status):
         return False
 
 def get_days_in_month(month_year_str):
-    """Extracts actual days available inside specific timeline string (e.g. 'Oct-2026')"""
+    """Extracts actual days available inside specific timeline string as an integer (e.g. 'Oct-2026')"""
     try:
         if "-" in month_year_str:
             parts = month_year_str.split("-")
@@ -74,59 +74,10 @@ def get_days_in_month(month_year_str):
             else:
                 m_num = int(parts[0])
                 year = int(parts[1])
-            return float(calendar.monthrange(year, m_num))
+            return int(calendar.monthrange(year, m_num)[1])
     except:
         pass
-    return 30.0  # Safe dynamic tracking fallback
-# ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (INITIAL DATA PROCESSING LOOP)
-# ============================================================================
-
-st.title("📋 Enterprise Attendance & Workforce Analytics Console")
-st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
-
-# Initialize default fallbacks before parsing loop to prevent race conditions
-p_hours = 8.0
-p4_hours = 16.0
-
-# Load Raw Datasets from Synced Production Pools
-raw_attendance_data = fetch_raw_attendance_feed()
-master_emp_data = fetch_cntr_employee_master()
-
-# Compile Employee Profile Metadata Map directly from cntr_employee_master
-emp_metadata_map = {}
-for emp in master_emp_data:
-    emp_id = emp.get("employee_id")
-    if emp_id:
-        emp_metadata_map[str(emp_id).strip().upper()] = {
-            "start_date": emp.get("start_date") or "N/A",
-            "last_day_of_work": emp.get("last_day_of_work") or "N/A",
-            "employee_status": emp.get("employee_status") or "Active",
-            "comp_monthly": float(emp.get("comp_monthly")) if emp.get("comp_monthly") else 0.00,
-            "shift_hours": float(emp.get("shift_hours")) if emp.get("shift_hours") else 8.00,
-            "show_flag": emp.get("show", True)
-        }
-
-def parse_days_to_hours(days_list, p_val, p4_val):
-    """Evaluates attendance tracking tokens against live configurations dynamically"""
-    calculated_hours = 0.0
-    calculated_days = 0.0
-    for token in days_list:
-        if not token:
-            continue
-        token_str = str(token).strip().upper()
-        if token_str == "P":
-            calculated_hours += p_val
-            calculated_days += 1.0
-        elif token_str == "P4":
-            calculated_hours += p4_val
-            calculated_days += 1.0
-        elif re.match(r"^\d+(\.\d+)?$", token_str):
-            val = float(token_str)
-            calculated_hours += val
-            if val > 0:
-                calculated_days += 1.0
-    return calculated_hours, calculated_days
+    return 31  # Clean integer standard fallback
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (FILTERS & RENDER ENGINE SETUP)
 # ============================================================================
@@ -136,8 +87,22 @@ if not raw_attendance_data:
 else:
     st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
     
-    # ⚙️ Shift Code Weight Configuration Rules placed directly under the main header
-    st.markdown("##### **⚙️ Live Shift Code Weight Rules**")
+    st.markdown("##### **🔍 Search Filters & Range Sub-Truncations**")
+    mat_col1, mat_col2, mat_col3, mat_col4 = st.columns(4)
+    
+    # Comprehensive unique month compilation out of the active data stream pool
+    available_months_list = sorted(list({item.get("month_year") for item in raw_attendance_data if item.get("month_year")}))
+    
+    with mat_col3:
+        search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + available_months_list, key="mat_month_input")
+    
+    # Clean Integer Default Picker
+    if search_mat_month == "All Months":
+        default_days_baseline = 31
+    else:
+        default_days_baseline = get_days_in_month(search_mat_month)
+        
+    st.markdown("##### **⚙️ Live Operational & Payroll Rules**")
     w_col1, w_col2 = st.columns(2)
     with w_col1:
         p_hours = st.number_input(
@@ -145,23 +110,16 @@ else:
             min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input"
         )
     with w_col2:
-        p4_hours = st.number_input(
-            label="Hours value for 'P4' (Double/Extended Shift):",
-            min_value=0.0, max_value=24.0, value=16.0, step=0.5, key="weight_p4_input"
+        # Enforced whole integers by removing decimals from value and step configurations
+        selected_month_days_base = st.number_input(
+            label="Operational Days Base in Selected Month Frame:",
+            min_value=1, max_value=31, value=int(default_days_baseline), step=1, key="month_days_override_input"
         )
         
-    st.markdown("##### **🔍 Search Filters & Range Sub-Truncations**")
-    mat_col1, mat_col2, mat_col3, mat_col4 = st.columns(4)
-    
-    # Comprehensive unique month compilation out of the active data stream pool
-    available_months_list = sorted(list({item.get("month_year") for item in raw_attendance_data if item.get("month_year")}))
-    
     with mat_col1:
         search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
     with mat_col2:
         search_mat_name = st.text_input("Filter Ledger by Employee Name:", "", key="mat_name_input").strip()
-    with mat_col3:
-        search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + available_months_list, key="mat_month_input")
     with mat_col4:
         search_mat_status = st.selectbox("Filter Ledger by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
         
@@ -170,12 +128,7 @@ else:
     # Construct the tracking dataframe dynamically using live inputs
     processed_rows = []
     for item in raw_attendance_data:
-        # Schema verification fix: text[] arrays drop straight down as lists from Supabase
         days_list = item.get("attendance_days") or []
-        if isinstance(days_list, str):
-            try: days_list = json.loads(days_list)
-            except: days_list = []
-                
         m_yr = item.get("month_year") or "N/A"
         emp_id_str = str(item.get("employee_id") or "").strip().upper()
         meta = emp_metadata_map.get(emp_id_str, {
@@ -188,14 +141,14 @@ else:
             try: return float(val)
             except: return 0.00
 
-        total_hours_worked, total_days_worked = parse_days_to_hours(days_list, p_hours, p4_hours)
+        total_hours_worked, total_days_worked = parse_days_to_hours(days_list, p_hours)
         current_status = meta.get("employee_status", "Active")
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
         configured_shift_hours = meta.get("shift_hours", 8.00)
-        days_in_current_month = get_days_in_month(m_yr)
         
-        if current_status.upper() == "ACTIVE" and days_in_current_month > 0:
-            per_hour_rate = (configured_monthly_comp / days_in_current_month) / configured_shift_hours
+        # Payroll calculations using integer days
+        if current_status.upper() == "ACTIVE" and selected_month_days_base > 0:
+            per_hour_rate = (configured_monthly_comp / float(selected_month_days_base)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
             calculated_gross_payout = per_hour_rate * total_hours_worked
             total_minutes_worked = total_hours_worked * 60.0
@@ -288,7 +241,7 @@ else:
     st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
-        st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days in Month}}{\\text{Shift Hours} \\times 60}$$")
+        st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days Override}}{\\text{Shift Hours} \\times 60}$$")
     with f_col2:
         st.info("**2. Total Minutes Processed**\n\n$$\\text{Total Minutes} = \\text{Total Hours Worked} \\times 60$$")
     with f_col3:
