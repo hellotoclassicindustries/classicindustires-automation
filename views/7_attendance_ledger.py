@@ -54,12 +54,12 @@ def fetch_cntr_employee_master():
         return []
 
 def update_db_payment_status(employee_id, month_year, new_status):
-    """Performs transactional REST PATCH to persist updated payment state down to the Supabase layer"""
+    """Performs transactional REST PATCH to update payment state down to Supabase"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?employee_id=eq.{employee_id}&month_year=eq.{month_year}"
     payload = {"payment_status": new_status}
     try:
         res = requests.patch(endpoint, headers=HEADERS, json=payload)
-        return res.status_code in [200, 201, 204]
+        return res.status_code in
     except Exception:
         return False
 
@@ -85,7 +85,7 @@ def get_days_in_month(month_year_str):
 st.title("📋 Enterprise Attendance & Workforce Analytics Console")
 st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
 
-# Initialize default fallbacks before parsing loop to prevent race conditions
+# Initialize default fallback hours for the P token
 p_hours = 8.0
 
 # Load Raw Datasets from Synced Production Pools
@@ -141,23 +141,8 @@ else:
     available_months_list = sorted(list({item.get("month_year") for item in raw_attendance_data if item.get("month_year")}))
     
     with mat_col3:
-        search_mat_month = st.selectbox("Filter Ledger by Month Frame:", options=["All Months"] + available_months_list, key="mat_month_input")
-    
-    # Clean Integer Default Picker calculation
-    if search_mat_month == "All Months":
-        default_days_baseline = 31
-    else:
-        default_days_baseline = get_days_in_month(search_mat_month)
+        search_mat_month = st.selectbox("Select Full Month Filter:", options=["All Months"] + available_months_list, key="mat_month_input")
         
-    # State tracking logic to fix persistent value issue across dropdown selections
-    if "previous_selected_month" not in st.session_state:
-        st.session_state["previous_selected_month"] = search_mat_month
-        st.session_state["month_days_override_input"] = int(default_days_baseline)
-        
-    if st.session_state["previous_selected_month"] != search_mat_month:
-        st.session_state["previous_selected_month"] = search_mat_month
-        st.session_state["month_days_override_input"] = int(default_days_baseline)
-
     st.markdown("##### **⚙️ Live Operational & Payroll Rules**")
     w_col1, w_col2 = st.columns(2)
     with w_col1:
@@ -166,12 +151,13 @@ else:
             min_value=0.0, max_value=24.0, value=8.0, step=0.5, key="weight_p_input"
         )
     with w_col2:
-        # Read/Write live via explicit session state targeting to guarantee dynamic calculation update rules
-        selected_month_days_base = st.number_input(
-            label="Total Days in Selected Month:",
-            min_value=1, max_value=31, step=1,
-            key="month_days_override_input"
-        )
+        # AUTOMATIC FULL MONTH CALCULATION: Instantly outputs calculated days based on your single month selection
+        if search_mat_month == "All Months":
+            selected_month_days_base = 31
+            st.info("📅 **Total Days in Selection:** Running calculations on a **31-day** basis.")
+        else:
+            selected_month_days_base = get_days_in_month(search_mat_month)
+            st.success(f"📅 **Total Days in Selection:** Automatically mapped to **{selected_month_days_base} days** for {search_mat_month}")
         
     with mat_col1:
         search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
@@ -203,9 +189,11 @@ else:
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
         configured_shift_hours = meta.get("shift_hours", 8.00)
         
-        # Payroll calculations using integer days baseline
-        if current_status.upper() == "ACTIVE" and selected_month_days_base > 0:
-            per_hour_rate = (configured_monthly_comp / float(selected_month_days_base)) / configured_shift_hours
+        row_month_days = get_days_in_month(m_yr) if search_mat_month == "All Months" else selected_month_days_base
+
+        # Payroll calculations
+        if current_status.upper() == "ACTIVE" and row_month_days > 0:
+            per_hour_rate = (configured_monthly_comp / float(row_month_days)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
             calculated_gross_payout = per_hour_rate * total_hours_worked
             total_minutes_worked = total_hours_worked * 60.0
