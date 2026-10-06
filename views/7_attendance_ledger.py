@@ -54,12 +54,13 @@ def fetch_cntr_employee_master():
         return []
 
 def update_db_payment_status(employee_id, month_year, new_status):
-    """Performs transactional REST PATCH to update payment state down to Supabase"""
+    """Performs transactional REST PATCH to persist updated payment state down to the Supabase layer"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?employee_id=eq.{employee_id}&month_year=eq.{month_year}"
     payload = {"payment_status": new_status}
     try:
         res = requests.patch(endpoint, headers=HEADERS, json=payload)
-        return res.status_code in
+        # SYNTAX FIX: Successfully matches common REST patch completion standard codes
+        return res.status_code in [200, 201, 204]
     except Exception:
         return False
 
@@ -68,12 +69,12 @@ def get_days_in_month(month_year_str):
     try:
         if "-" in month_year_str:
             parts = month_year_str.split("-")
-            if parts[0].isalpha():
-                m_num = list(calendar.month_abbr).index(parts[0].title())
-                year = int(parts[1])
+            if parts.isalpha():
+                m_num = list(calendar.month_abbr).index(parts.title())
+                year = int(parts)
             else:
-                m_num = int(parts[0])
-                year = int(parts[1])
+                m_num = int(parts)
+                year = int(parts)
             return int(calendar.monthrange(year, m_num))
     except:
         pass
