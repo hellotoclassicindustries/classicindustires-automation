@@ -88,9 +88,6 @@ def parse_row_date(month_year_str):
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (INITIAL DATA PROCESSING LOOP)
 # ============================================================================
 
-st.title("📋 Enterprise Attendance & Workforce Analytics Console")
-st.markdown("Monitor rolling month-wise employee shift parameters, calendar duration windows, and dynamic payroll payouts.")
-
 # Initialize default fallback hours for the P token
 p_hours = 8.0
 
@@ -139,15 +136,15 @@ def parse_days_to_hours(days_list, p_val):
 if not raw_attendance_data:
     st.info("📋 System Log: No staging rows found inside public.raw_attendance_feed table space.")
 else:
-    st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
-    
-    # 📆 CALCULATE PAST MONTH AUTOMATICALLY
+    # 📆 CALCULATE PAST MONTH WITH PROPER TUPLE INDEXING
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
+    
+    # FIX: Added [1] index to pull out only the total number of days integer from the monthrange tuple
     default_start = past_month_date.replace(day=1)
-    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month))
+    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
 
-    # Single Calendar Picker: Renamed to "Select Payout Month" with automatic previous-month defaulting
+    # Single Calendar Picker: Automatically defaults to previous-month range parameters
     chosen_dates = st.date_input(
         "Select Payout Month:",
         value=(default_start, default_end),
@@ -204,8 +201,12 @@ else:
         configured_monthly_comp = meta.get("comp_monthly", 0.00)
         configured_shift_hours = meta.get("shift_hours", 8.00)
         
-        if current_status.upper() == "ACTIVE" and total_days_basis > 0:
-            per_hour_rate = (configured_monthly_comp / float(total_days_basis)) / configured_shift_hours
+        # Behind-the-scenes calendar mapping logic fixes decimal constraints automatically
+        row_month_days = calendar.monthrange(row_dt.year, row_dt.month)[1] if row_dt else total_days_basis
+
+        # Payroll calculations
+        if current_status.upper() == "ACTIVE" and row_month_days > 0:
+            per_hour_rate = (configured_monthly_comp / float(row_month_days)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
             calculated_gross_payout = per_hour_rate * total_hours_worked
             total_minutes_worked = total_hours_worked * 60.0
