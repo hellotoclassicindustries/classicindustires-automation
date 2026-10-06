@@ -153,8 +153,8 @@ else:
     st.markdown("##### **🔍 Search Filters & Range Sub-Truncations**")
     mat_col1, mat_col2, mat_col3, mat_col4 = st.columns(4)
     
-    # Build list of unique months available in data pool
-    available_months_list = sorted(list({item.get("month_year") for item in raw_attendance_feed if item.get("month_year")}))
+    # Comprehensive unique month compilation out of the active data stream pool
+    available_months_list = sorted(list({item.get("month_year") for item in raw_attendance_data if item.get("month_year")}))
     
     with mat_col1:
         search_mat_id = st.text_input("Filter Ledger by Employee ID:", "", key="mat_id_input").strip()
@@ -170,6 +170,7 @@ else:
     # Construct the tracking dataframe dynamically using live inputs
     processed_rows = []
     for item in raw_attendance_data:
+        # Schema verification fix: text[] arrays drop straight down as lists from Supabase
         days_list = item.get("attendance_days") or []
         if isinstance(days_list, str):
             try: days_list = json.loads(days_list)
@@ -282,7 +283,7 @@ else:
                         st.cache_data.clear()
                         st.rerun()
 
-    # Formulas reference block
+    # Formulas Reference block
     st.html("<hr>")
     st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
     f_col1, f_col2, f_col3 = st.columns(3)
