@@ -81,26 +81,100 @@ def get_days_in_month(month_year_str):
         return int(calendar.monthrange(dt.year, dt.month)[1])
     return 31
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (FILTERS ENGINE & COMPUTATION MATRIX)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 & 3 (PROCESSING ENGINE & FILTER PANEL)
 # ============================================================================
 
-# Load combined data from the Supabase view schema directly
+# Load integrated data rows directly from the unified view schema
 view_records_data = fetch_unified_attendance_ledger()
 
+def process_workforce_metrics_from_tokens(days_list, base_shift):
+    """
+    DYNAMIC PARSING ENGINE: 
+    Rebuilds working hours and proportional days directly from raw characters
+    to match your exact Google Sheets hierarchy and avoid database data corruption.
+    """
+    calculated_hours = 0.0
+    raw_days_present = 0.0
+    
+    for token in days_list:
+        if not token:
+            continue
+        clean = str(token).strip().upper()
+        
+        # Check for absences / blank spaces
+        if clean == "" or clean == "A":
+            hours_today = 0.0
+        # Standard Present tag matches their master required contract base shift length
+        elif clean == "P":
+            hours_today = base_shift
+            raw_days_present += 1.0
+        # Pure whole integer entries
+        elif re.match(r"^\d+$", clean):
+            hours_today = float(clean)
+            if hours_today > 0:
+                raw_days_present += 1.0
+        # Fractional time markers splitting hours and minutes (e.g. '11/30')
+        elif "/" in clean:
+            try:
+                parts = clean.split("/")
+                hours_today = float(parts[0]) + (float(parts[1]) / 60.0)
+                if hours_today > 0:
+                    raw_days_present += 1.0
+            except:
+                hours_today = 0.0
+        # DYNAMIC TO-DO ALIGNMENT FIX: P4 adds EXACTLY 4 hours of overtime to their contract base
+        elif clean == "P4":
+            hours_today = base_shift + 4.0
+            raw_days_present += 1.0
+        # Mixed presence indicator tags
+        elif "P" in clean:
+            try:
+                numeric_extracted = re.sub(r"[^0-9.]", "", clean)
+                overtime_val = float(numeric_extracted) if numeric_extracted else 0.0
+                hours_today = base_shift + overtime_val
+                raw_days_present += 1.0
+            except:
+                hours_today = base_shift
+                raw_days_present += 1.0
+        # General text strings wrapping numeric variables (e.g. 'OT3.5')
+        else:
+            try:
+                numeric_extracted = re.sub(r"[^0-9.]", "", clean)
+                hours_today = float(numeric_extracted) if numeric_extracted else 0.0
+                if hours_today > 0:
+                    raw_days_present += 1.0
+            except:
+                hours_today = 0.0
+                
+        calculated_hours += hours_today
+        
+    # Proportional fractional day allocation tracking logic (To-Do List Item #2)
+    if base_shift > 0:
+        actual_days_worked = calculated_hours / base_shift
+    else:
+        actual_days_worked = raw_days_present
+        
+    return round(calculated_hours, 2), int(raw_days_present), round(actual_days_worked, 2)
+
+# ============================================================================
+# RENDERING INTERFACE CONDITIONAL PIPELINE
+# ============================================================================
 if not view_records_data:
     st.info("📋 System Log: No integrated database rows found inside the v_attendance_ledger workspace view.")
 else:
+    st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
+    
     # Calculate previous calendar month parameters automatically
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
     default_start = past_month_date.replace(day=1)
     default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
 
-    # Single calendar input widget setup
+    # Single Calendar input widget setup - Enforced unique baseline mapping key
     chosen_dates = st.date_input(
         "Select Payout Month:",
         value=(default_start, default_end),
-        key="main_graphical_calendar_picker"
+        key="unique_attendance_calendar_range_picker"
     )
 
     if isinstance(chosen_dates, tuple) and len(chosen_dates) == 2:
@@ -108,16 +182,23 @@ else:
     else:
         start_cal, end_cal = default_start, default_end
 
-    # Search filter layout configs
-    mat_col1, mat_col4 = st.columns(2)
+    # Calculate selection lengths silently behind the scenes
+    total_days_basis = int((end_cal - start_cal).days) + 1
+    if total_days_basis <= 0:
+        total_days_basis = 30
+
+    # Layout filter fields row
+    mat_col1, mat_col2, mat_col4 = st.columns(3)
     with mat_col1:
         search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
+    with mat_col2:
+        search_mat_name = st.text_input("Filter by Employee Name:", "", key="mat_name_input").strip()
     with mat_col4:
         search_mat_status = st.selectbox("Filter by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
 
     start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
 
-    # Processing array mapping loop
+    # Construct the tracking dataframe dynamically using calendar limits
     processed_rows = []
     for item in view_records_data:
         m_yr = item.get("month_year") or "N/A"
@@ -128,111 +209,10 @@ else:
             if not (start_cal <= row_dt <= end_cal):
                 continue
                 
-        def safe_float(val):
-            if val is None or str(val).strip() == "" or str(val).lower() == "none": return 0.00
-            try: return float(val)
-            except: return 0.00
-
-        # Sourced straight from unified view columns map
-        total_hours_worked = safe_float(item.get("total_hours"))
-        total_days_worked = safe_float(item.get("total_days"))
-        base_monthly_comp = safe_float(item.get("base_monthly_comp"))
-        configured_shift_hours = safe_float(item.get("shift_hours") or 12.00)
-        current_status = item.get("employee_status") or "Active"
-        days_list = item.get("attendance_days") or []
-        
-        # 🧮 IN-MEMORY CALCULATIONS Engine (Pure RAM Math allocations)
-        total_minutes_worked = total_hours_worked * 60.0
-        row_month_days = get_days_in_month(m_yr)
-        
-        if configured_shift_hours > 0:
-            actual_days_worked = round(total_hours_worked / configured_shift_hours, 2)
-        else:
-            actual_days_worked = 0.00
-
-        if current_status.upper() == "ACTIVE" and row_month_days > 0 and configured_shift_hours > 0:
-            per_hour_rate = (base_monthly_comp / float(row_month_days)) / configured_shift_hours
-            per_minute_rate = per_hour_rate / 60.0
-            calculated_gross_payout = total_minutes_worked * per_minute_rate
-        else:
-            per_hour_rate = 0.00
-            per_minute_rate = 0.00
-            calculated_gross_payout = 0.00
-
-        row_dict = {
-            "Month_Year": m_yr,
-            "EMP_ID": item.get("employee_id") or "N/A",
-            "EMP_Name": item.get("employee_name") or "Unnamed",
-            "Over_Time": safe_float(item.get("over_time")),
-            "Less_Time": safe_float(item.get("less_time")),
-            "Total_Hours": total_hours_worked,
-            "Total_Minutes": total_minutes_worked,             # RAM Calculated Metric
-            "Total_Days": total_days_worked,                   # Raw Days Sourced from DB
-            "Actual_Days_Worked": actual_days_worked,           # RAM Calculated Proportional Metric
-            "Start_Date": item.get("start_date") or "N/A",
-            "Last_Date": item.get("last_day_of_work") or "N/A",
-            "EMP_Status": current_status,
-            "Base_Monthly_Comp": base_monthly_comp,
-            "Rate_Per_Hour": per_hour_rate,                    # RAM Calculated Metric
-            "Rate_Per_Minute": per_minute_rate,                # RAM Calculated Metric
-            "Gross_Payout": calculated_gross_payout,           # RAM Calculated Metric
-            "Payment_Status": item.get("payment_status") or "Pending",
-            "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
-        }
-        for day in range(1, 32):
-            row_dict[f"D{day:02d}"] = days_list[day-1] if (days_list and day-1 < len(days_list)) else ""
-        processed_rows.append(row_dict)
-        
-    df = pd.DataFrame(processed_rows)
-# ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (CALENDAR LAYOUTS & STABLE DATAFRAME GENERATION)
-# ============================================================================
-
-    # Calculate previous calendar month parameters automatically
-    today = datetime.date.today()
-    past_month_date = today - relativedelta(months=1)
-    default_start = past_month_date.replace(day=1)
-    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
-
-    # Render unified date picker widget
-    chosen_dates = st.date_input(
-        "Select Payout Month:",
-        value=(default_start, default_end),
-        key="main_graphical_calendar_picker"
-    )
-
-    if isinstance(chosen_dates, tuple) and len(chosen_dates) == 2:
-        start_cal, end_cal = chosen_dates
-    else:
-        start_cal, end_cal = default_start, default_end
-
-    # Layout search strings filters
-    mat_col1, mat_col4 = st.columns(2)
-    with mat_col1:
-        search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
-    with mat_col4:
-        search_mat_status = st.selectbox("Filter by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
-
-    start_day, end_day = st.slider("Select Day Columns View Range:", min_value=1, max_value=31, value=(1, 31), key="mat_day_slider")
-
-    # Rebuild processing arrays cleanly in-memory
-    processed_rows = []
-    for item in view_records_data:
-        m_yr = item.get("month_year") or "N/A"
-        row_dt = parse_row_date(m_yr)
-        
-        if row_dt:
-            if not (start_cal <= row_dt <= end_cal):
-                continue
-                
         days_list = item.get("attendance_days") or []
         emp_id_str = str(item.get("employee_id") or "").strip().upper()
         
-        def safe_float(val):
-            if val is None or str(val).strip() == "" or str(val).lower() == "none": return 0.00
-            try: return float(val)
-            except: return 0.00
-
+        # Pull parameters safely from joint data schema view properties
         base_monthly_comp = safe_float(item.get("base_monthly_comp"))
         configured_shift_hours = safe_float(item.get("shift_hours") or 8.00)
         current_status = item.get("employee_status") or "Active"
@@ -243,7 +223,7 @@ else:
         total_minutes_worked = total_hours_worked * 60.0
         row_month_days = get_days_in_month(m_yr)
 
-        # Payroll metric rate logic executions
+        # Payroll rate logic computations
         if current_status.upper() == "ACTIVE" and row_month_days > 0 and configured_shift_hours > 0:
             per_hour_rate = (base_monthly_comp / float(row_month_days)) / configured_shift_hours
             per_minute_rate = per_hour_rate / 60.0
@@ -278,3 +258,148 @@ else:
         processed_rows.append(row_dict)
         
     df = pd.DataFrame(processed_rows)
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 4A (TABLE GRAPHICS ENGINE)
+# ============================================================================
+
+    if df.empty:
+        st.warning("⚠️ No operational records match the active tracking filters selected.")
+    else:
+        # Apply filter conditions
+        filtered_df = df[df["DB_Show_Flag"] == True].copy()
+        if search_mat_id:
+            filtered_df = filtered_df[filtered_df["EMP_ID"].astype(str).str.contains(search_mat_id, case=False, na=False)]
+        if search_mat_name:
+            filtered_df = filtered_df[filtered_df["EMP_Name"].astype(str).str.contains(search_mat_name, case=False, na=False)]
+        if search_mat_status == "Active Only":
+            filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "ACTIVE"]
+        elif search_mat_status == "In-Active Only":
+            filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
+
+        selected_day_cols = [f"D{d:02d}" for d in range(start_day, end_day + 1)]
+        
+        # Grid column order setup including Actual_Days_Worked and legacy elements
+        grid_columns_order = (
+            ["Month_Year", "EMP_ID", "EMP_Name"] + selected_day_cols + 
+            ["Over_Time", "Less_Time", "Total_Hours", "Total_Minutes", "Total_Days", "Actual_Days_Worked", "Base_Monthly_Comp", 
+             "Rate_Per_Hour", "Rate_Per_Minute", "Gross_Payout", "Payment_Status", "Start_Date", "Last_Date", "EMP_Status"]
+        )
+        
+        validated_columns = [col for col in grid_columns_order if col in filtered_df.columns]
+        render_df = filtered_df[validated_columns]
+
+        cfg = {
+            "Month_Year": st.column_config.TextColumn("Month_Year", width="small", disabled=True),
+            "EMP_ID": st.column_config.TextColumn("EMP ID", width="small", disabled=True),
+            "EMP_Name": st.column_config.TextColumn("Employee Name", width="medium", disabled=True),
+            "Over_Time": st.column_config.NumberColumn("Extra Hrs", format="%.2f", width="small", disabled=True),
+            "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small", disabled=True),
+            "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small", disabled=True),
+            "Total_Minutes": st.column_config.NumberColumn("Total Min (RAM)", format="%.0f", width="small", disabled=True),
+            "Total_Days": st.column_config.NumberColumn("Raw Days Present", format="%.0f", width="small", disabled=True),
+            "Actual_Days_Worked": st.column_config.NumberColumn("Actual Days Worked (Proportional)", format="%.2f", width="medium", disabled=True),
+            "Base_Monthly_Comp": st.column_config.NumberColumn("Base Comp Rate", format="₹%.2f", width="small", disabled=True),
+            "Rate_Per_Hour": st.column_config.NumberColumn("Hourly Rate (RAM)", format="₹%.2f", width="small", disabled=True),
+            "Rate_Per_Minute": st.column_config.NumberColumn("Per Min Rate (RAM)", format="₹%.4f", width="small", disabled=True),
+            "Gross_Payout": st.column_config.NumberColumn("Calculated Gross Payout", format="₹%.2f", width="medium", disabled=True),
+            "Payment_Status": st.column_config.SelectboxColumn("Payment Status", width="medium", options=["Pending", "Done"], required=True),
+            "EMP_Status": st.column_config.TextColumn("EMP Status", width="small", disabled=True)
+        }
+        for d_col in selected_day_cols:
+            if d_col in validated_columns:
+                cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
+
+        edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 4B (SYNC, FORMULAS & EXPORTS)
+# ============================================================================
+
+        # Detect modifications and execute dynamic database updates down to public.raw_attendance_feed
+        if st.session_state.attendance_ledger_data_editor.get("edited_rows"):
+            modifications = st.session_state.attendance_ledger_data_editor["edited_rows"]
+            for numeric_index_str, altered_props in modifications.items():
+                row_idx = int(numeric_index_str)
+                if "Payment_Status" in altered_props:
+                    target_emp = render_df.iloc[row_idx]["EMP_ID"]
+                    target_month = render_df.iloc[row_idx]["Month_Year"]
+                    updated_val = altered_props["Payment_Status"]
+                    
+                    with st.spinner(f"Updating status for {target_emp}..."):
+                        if update_db_payment_status(target_emp, target_month, updated_val):
+                            st.success(f"✓ Synchronised Ledger Row status to '{updated_val}' for Employee ID: {target_emp}")
+                            st.cache_data.clear()
+                            st.rerun()
+
+        # Formulas Reference block
+        st.html("<hr>")
+        st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
+        f_col1, f_col2, f_col3 = st.columns(3)
+        with f_col1:
+            st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days in Month}}{\\text{Shift Hours} \\times 60}$$")
+        with f_col2:
+            st.info("**2. Proportional Days Math**\n\n$$\\text{Actual Days Worked} = \\frac{\\text{Total Hours Worked}}{\\text{Master Table Shift Hours}}$$")
+        with f_col3:
+            st.info("**3. Consolidated Gross Payout**\n\n$$\\text{Gross Payout} = \\text{Total Minutes (RAM)} \\times \\text{Rate per Min}$$")
+        st.html("<hr>")
+
+        # 📥 Export Workspaces (Completely Unaltered)
+        st.markdown("#### 📥 Export Historical Attendance Matrix Ledger")
+        down_col1, down_col2 = st.columns(2)
+        
+        with down_col1:
+            csv_df = edited_df.copy()
+            for col in csv_df.columns:
+                if col.startswith("D") and col[1:].isdigit():
+                    csv_df[col] = csv_df[col].apply(lambda x: f"\t{x}" if (isinstance(x, str) and "/" in x) else x)
+            csv_buffer = io.StringIO()
+            csv_df.to_csv(csv_buffer, index=False)
+            st.download_button(
+                label="📊 Download Ledger as CSV (Preserve Formats)", data=csv_buffer.getvalue(),
+                file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.csv", mime="text/csv", key="ledger_csv_download_btn"
+            )
+            
+        with down_col2:
+            def generate_ledger_matrix_pdf(dataframe):
+                pdf_buffer = io.BytesIO()
+                document = SimpleDocTemplate(pdf_buffer, pagesize=landscape(letter), rightMargin=20, leftMargin=20, topMargin=30, bottomMargin=30)
+                story_components = []
+                pdf_styles = getSampleStyleSheet()
+                title_text_style = ParagraphStyle('LedgerTitleStyle', parent=pdf_styles['Heading1'], fontSize=14, leading=18, textColor=colors.HexColor("#1A365D"), alignment=0)
+                header_cell_style = ParagraphStyle('LedgerHeaderStyle', parent=pdf_styles['Normal'], fontSize=6, leading=8, textColor=colors.white, fontName="Helvetica-Bold")
+                data_cell_style = ParagraphStyle('LedgerDataStyle', parent=pdf_styles['Normal'], fontSize=5, leading=7, textColor=colors.black)
+                
+                story_components.append(Paragraph("Main Historical Attendance Matrix Ledger", title_text_style))
+                story_components.append(Spacer(1, 10))
+                headers = list(dataframe.columns)
+                pdf_table_data = [[Paragraph(f"<b>{h}</b>", header_cell_style) for h in headers]]
+                
+                for _, row_data in dataframe.iterrows():
+                    row_cells = []
+                    for header_item in headers:
+                        val = row_data[header_item]
+                        val_str = f"{val:.2f}" if isinstance(val, float) else str(val)
+                        row_cells.append(Paragraph(val_str, data_cell_style))
+                    pdf_table_data.append(row_cells)
+                
+                total_cols = len(headers)
+                available_width = 752  
+                column_width = max(20, available_width / total_cols)
+                matrix_table = Table(pdf_table_data, colWidths=[column_width]*total_cols, repeatRows=1)
+                matrix_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2B6CB0")), ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('GRID', (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E0")),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7FAFC")]),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                story_components.append(matrix_table)
+                document.build(story_components)
+                pdf_buffer.seek(0)
+                return pdf_buffer.getvalue()
+
+            if not edited_df.empty:
+                st.download_button(
+                    label="📄 Download Ledger as PDF (Landscape)", data=generate_ledger_matrix_pdf(edited_df),
+                    file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.pdf", mime="application/pdf", key="ledger_pdf_download_btn"
+                )
+            else:
+                st.button("📄 Download Ledger as PDF (Landscape)", disabled=True)
