@@ -30,7 +30,7 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-# 🛠️ GLOBAL HELPERS: Declared at the top-level scope to avoid runtime NameErrors
+# 🛠️ GLOBAL HELPERS: Declared at top-level module scope to avoid runtime NameErrors
 def safe_float(val):
     """Safely converts database parameters into float values"""
     if val is None or str(val).strip() == "" or str(val).lower() == "none":
@@ -87,7 +87,7 @@ def get_days_in_month(month_year_str):
     """Extracts actual days available inside specific timeline string as an integer"""
     dt = parse_row_date(month_year_str)
     if dt:
-        return int(calendar.monthrange(dt.year, dt.month))
+        return int(calendar.monthrange(dt.year, dt.month)[1])
     return 31
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (FILTERS ENGINE & COMPUTATION MATRIX)
@@ -102,8 +102,10 @@ else:
     # 📆 Calculate previous calendar month parameters automatically
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
+    
+    # SYNTAX FIX: Added index slice tracker array selector parameter to unpack standard calendar tuple returns safely
     default_start = past_month_date.replace(day=1)
-    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month))
+    default_end = past_month_date.replace(day=int(calendar.monthrange(past_month_date.year, past_month_date.month)[1]))
 
     # Single Calendar input widget setup with an isolated unique key
     chosen_dates = st.date_input(
