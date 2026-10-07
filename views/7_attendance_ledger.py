@@ -30,9 +30,9 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-# 🛠️ GLOBAL HELPERS: Moved to top-level module scope to avoid compilation NameErrors
+# 🛠️ GLOBAL HELPERS: Declared at the top-level scope to avoid runtime NameErrors
 def safe_float(val):
-    """Safely converts database parameters into float formatting targets"""
+    """Safely converts database parameters into float values"""
     if val is None or str(val).strip() == "" or str(val).lower() == "none":
         return 0.00
     try:
@@ -41,9 +41,9 @@ def safe_float(val):
         return 0.00
 
 @st.cache_data(ttl=2)
-def fetch_unified_attendance_ledger():
-    """Queries the deployed public.v_attendance_ledger Supabase view database layer"""
-    endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/v_attendance_ledger?order=month_year.desc,employee_id.asc"
+def fetch_vw_attendance_ledger():
+    """Queries the newly deployed public.vw_attendance_ledger Supabase view"""
+    endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/vw_attendance_ledger?order=month_year.desc,employee_id.asc"
     try:
         response = requests.get(endpoint, headers=HEADERS)
         if response.status_code == 200:
@@ -53,7 +53,7 @@ def fetch_unified_attendance_ledger():
         return []
 
 def update_db_payment_status(employee_id, month_year, new_status):
-    """Performs transactional REST PATCH to persist updated status changes down to Supabase feed tables"""
+    """Performs transactional REST PATCH to save payment status down to raw_attendance_feed"""
     endpoint = f"{SUPABASE_URL.strip('/')}/rest/v1/raw_attendance_feed?employee_id=eq.{employee_id}&month_year=eq.{month_year}"
     payload = {"payment_status": new_status}
     try:
@@ -63,7 +63,7 @@ def update_db_payment_status(employee_id, month_year, new_status):
         return False
 
 def parse_row_date(month_year_str):
-    """Maps custom string variations like 'September-2026' or '09-2026' into a proper datetime.date object"""
+    """Maps string variations like 'September-2026' into a proper datetime.date object"""
     if not month_year_str or str(month_year_str).strip() == "N/A":
         return None
     normalized = str(month_year_str).strip().replace("/", "-")
@@ -84,30 +84,28 @@ def parse_row_date(month_year_str):
     return None
 
 def get_days_in_month(month_year_str):
-    """Extracts actual days available inside specific timeline string as an integer (e.g. 'Oct-2026')"""
+    """Extracts actual days available inside specific timeline string as an integer"""
     dt = parse_row_date(month_year_str)
     if dt:
-        return int(calendar.monthrange(dt.year, dt.month)[1])
+        return int(calendar.monthrange(dt.year, dt.month))
     return 31
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (FILTERS INTERFACE & MATRIX PROCESSING LOOP)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 2 (FILTERS ENGINE & COMPUTATION MATRIX)
 # ============================================================================
 
-# Load integrated view table lines directly from Supabase
-view_records_data = fetch_unified_attendance_ledger()
+# Load combined layout metrics straight from your joint Supabase database view
+view_records_data = fetch_vw_attendance_ledger()
 
 if not view_records_data:
-    st.info("📋 System Log: No integrated database rows found inside the v_attendance_ledger workspace view.")
+    st.info("📋 System Log: No integrated database rows found inside the vw_attendance_ledger workspace view.")
 else:
-    st.markdown("### 🖥️ Main Historical Attendance Matrix Ledger")
-    
-    # Calculate previous calendar month parameters automatically
+    # 📆 Calculate previous calendar month parameters automatically
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
     default_start = past_month_date.replace(day=1)
-    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month)[1])
+    default_end = past_month_date.replace(day=calendar.monthrange(past_month_date.year, past_month_date.month))
 
-    # Single calendar dropdown selector input widget
+    # Single Calendar input widget setup with an isolated unique key
     chosen_dates = st.date_input(
         "Select Payout Month:",
         value=(default_start, default_end),
@@ -119,7 +117,7 @@ else:
     else:
         start_cal, end_cal = default_start, default_end
 
-    # Search filter field layout column rows - Day columns view range slider completely removed
+    # Search filter layout columns row - Slider filter removed entirely
     mat_col1, mat_col2, mat_col4 = st.columns(3)
     with mat_col1:
         search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
@@ -128,31 +126,29 @@ else:
     with mat_col4:
         search_mat_status = st.selectbox("Filter by Employee Status:", options=["All Statuses", "Active Only", "In-Active Only"], key="mat_status_input")
 
-    # Construct the tracking dataframe dynamically using calendar window checks
+    # Processing array mapping loop
     processed_rows = []
     for item in view_records_data:
         m_yr = item.get("month_year") or "N/A"
         row_dt = parse_row_date(m_yr)
         
-        # Apply date boundary filtering logic
+        # Filter rows by calendar input bounds
         if row_dt:
             if not (start_cal <= row_dt <= end_cal):
                 continue
-                
-        days_list = item.get("attendance_days") or []
-        emp_id_str = str(item.get("employee_id") or "").strip().upper()
-        
-        # Extract variables securely using globally declared helper utility block
+
+        # DATABASE PRIORITY SOURCING: Pull raw totals straight out of combined view columns map
         total_hours_worked = safe_float(item.get("total_hours"))
-        total_days_worked = safe_float(item.get("total_days"))
+        total_days_worked = safe_float(item.get("total_days"))  
         base_monthly_comp = safe_float(item.get("base_monthly_comp"))
-        configured_shift_hours = safe_float(item.get("shift_hours") or 12.00)
+        configured_shift_hours = safe_float(item.get("shift_hours") or 8.00)  
         current_status = item.get("employee_status") or "Active"
+        days_list = item.get("attendance_days") or []
         
-        # 🧮 IN-MEMORY WORKFORCE CALCULATIONS PIPELINES
+        # 🧮 IN-MEMORY PAYROLL CALCULATIONS (Pure RAM Math allocations)
         total_minutes_worked = total_hours_worked * 60.0
         row_month_days = get_days_in_month(m_yr)
-        
+
         if configured_shift_hours > 0:
             actual_days_worked = round(total_hours_worked / configured_shift_hours, 2)
         else:
@@ -168,23 +164,23 @@ else:
             calculated_gross_payout = 0.00
 
         row_dict = {
-            "Month_Year": m_yr, 
-            "EMP_ID": item.get("employee_id") or "N/A", 
+            "Month_Year": m_yr,
+            "EMP_ID": item.get("employee_id") or "N/A",
             "EMP_Name": item.get("employee_name") or "Unnamed",
-            "Over_Time": safe_float(item.get("over_time")), 
+            "Over_Time": safe_float(item.get("over_time")),
             "Less_Time": safe_float(item.get("less_time")),
-            "Total_Hours": total_hours_worked, 
-            "Total_Minutes": total_minutes_worked, 
-            "Total_Days": total_days_worked,                   
-            "Actual_Days_Worked": actual_days_worked,           
+            "Total_Hours": total_hours_worked,
+            "Total_Minutes": total_minutes_worked,             # RAM Calculated Metric
+            "Total_Days": total_days_worked,                   # Raw Days Count from DB
+            "Actual_Days_Worked": actual_days_worked,           # RAM Proportional Calculated Metric
             "Start_Date": item.get("start_date") or "N/A",
-            "Last_Date": item.get("last_day_of_work") or "N/A", 
+            "Last_Date": item.get("last_day_of_work") or "N/A",
             "EMP_Status": current_status,
-            "Base_Monthly_Comp": base_monthly_comp, 
-            "Rate_Per_Hour": per_hour_rate, 
-            "Rate_Per_Minute": per_minute_rate,
-            "Gross_Payout": calculated_gross_payout,
-            "Payment_Status": item.get("payment_status") or "Pending", 
+            "Base_Monthly_Comp": base_monthly_comp,
+            "Rate_Per_Hour": per_hour_rate,                    # RAM Calculated Metric
+            "Rate_Per_Minute": per_minute_rate,                # RAM Calculated Metric
+            "Gross_Payout": calculated_gross_payout,           # RAM Calculated Metric
+            "Payment_Status": item.get("payment_status") or "Pending",
             "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
         }
         for day in range(1, 32):
@@ -193,11 +189,11 @@ else:
         
     df = pd.DataFrame(processed_rows)
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 - SUB-PART 3A (TABLE GRAPHICS ENGINE)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 3 (TABLE GRAPHICS ENGINE)
 # ============================================================================
 
     if df.empty:
-        st.warning("⚠️ No operational view records match the active tracking filters selected.")
+        st.warning("⚠️ No integrated view records match the active tracking filters selected.")
     else:
         # Apply filter conditions
         filtered_df = df[df["DB_Show_Flag"] == True].copy()
@@ -210,7 +206,7 @@ else:
         elif search_mat_status == "In-Active Only":
             filtered_df = filtered_df[filtered_df["EMP_Status"].str.upper() == "IN-ACTIVE"]
 
-        # Enforced static 31-day array grid column ordering layout 
+        # Enforced static 31-day array grid column layout
         all_day_cols = [f"D{d:02d}" for d in range(1, 32)]
         
         grid_columns_order = (
@@ -245,10 +241,10 @@ else:
 
         edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 - SUB-PART 3B (SYNC & EXPORT WORKSPACES)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 (SYNC & EXPORT WORKSPACES)
 # ============================================================================
 
-        # Handle user-edited table rows to update raw data state elements in the backend database
+        # Handle user edits to update payment status back to public.raw_attendance_feed
         if st.session_state.attendance_ledger_data_editor.get("edited_rows"):
             modifications = st.session_state.attendance_ledger_data_editor["edited_rows"]
             for numeric_index_str, altered_props in modifications.items():
@@ -271,7 +267,7 @@ else:
         with f_col1:
             st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days in Month}}{\\text{Shift Hours} \\times 60}$$")
         with f_col2:
-            st.info("**2. Proportional Days Math**\n\n$$\\text{Actual Days Worked} = \\frac{\\text{Total Hours Worked}}{\\text{Master Table Shift Hours}}$$")
+            st.info("**2. Proportional Days Math**\n\n$$\\text{Actual Days Worked} = \\frac{\\text{Total Hours Worked (From DB)}}{\\text{Master Table Shift Hours}}$$")
         with f_col3:
             st.info("**3. Consolidated Gross Payout**\n\n$$\\text{Gross Payout} = \\text{Total Minutes (RAM)} \\times \\text{Rate per Min}$$")
         st.html("<hr>")
