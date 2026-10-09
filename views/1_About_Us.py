@@ -118,8 +118,8 @@ tab_about, tab_services, tab_team = st.tabs(
 )
 
 # ============================================================================
-# VIEWS/1_ABOUT_US.PY - PART 4 (OUR SERVICES GALLERY RUNNING ADDITION)
-# CORE INDUSTRIAL WORKFLOWS & DYNAMIC RUNNING GALLERY MODULES
+# VIEWS/1_ABOUT_US.PY - PART 4 (GALLERY RUNNING SIZING FIX)
+# CORE WORKFLOW PANELS & COMPACT AUTOMATED GRID FOR RUNNING CATALOGS
 # ============================================================================
 
 with tab_about:
@@ -141,7 +141,7 @@ with tab_about:
         st.markdown("Our manufacturing plants feature automated scale infrastructure lines.")
 
 with tab_services:
-    st.write("### 🛠 ... Our Core Industrial Workflows")
+    st.write("### 🛠️ Our Core Industrial Workflows")
     col_fit, col_grind = st.columns(2)
     
     with col_fit:
@@ -163,29 +163,33 @@ with tab_services:
     st.markdown("---")
     
     # ---------------------------------------------------------------------
-    # DYNAMIC RUNNING PROFILES CATALOGUE GALLERY MATRIX LAYOUT
+    # DYNAMIC RUNNING CATALOGUE GRID WITH COMPACT CONTROLLED SIZING
     # ---------------------------------------------------------------------
     st.write("### 🎞️ Running Production Gallery Showcase")
     st.caption("Displaying newly uploaded workflow files and project catalog items automatically.")
     
-    # Dynamically scan files checking for both lowercase and uppercase image extensions
     gallery_files = [
         f for f in os.listdir(GALLERY_DIR) 
         if f.lower().endswith(('.jpg', '.jpeg', '.png'))
     ]
     
     if gallery_files:
-        # Create a clean horizontal layout loop acting as a running gallery format strip
-        running_gallery_cols = st.columns(min(len(gallery_files), 4))
+        # Enforce structural compact grids to safely restrict size growth
+        running_cols = st.columns(5)
         
         for idx, filename in enumerate(sorted(gallery_files)):
-            # Cap presentation view display layers safely inside max layout columns boundaries
-            col_target_idx = idx % min(len(gallery_files), 4)
             file_src_path = os.path.join(GALLERY_DIR, filename)
             display_label = os.path.splitext(filename)[0].replace("_", " ").title()
             
-            with running_gallery_cols[col_target_idx]:
-                st.image(file_src_path, caption=display_label, use_container_width=True)
+            with running_cols[idx % 5]:
+                # Option A: Compact native container framework check
+                st.image(file_src_path, use_container_width=False, width=120)
+                st.markdown(
+                    f"<p style='text-align:center; font-weight:600; "
+                    f"font-size:12px; color:#2D3748; margin-top:4px;'>"
+                    f"{display_label}</p>", 
+                    unsafe_allow_html=True
+                )
     else:
         st.info("ℹ️ Upload workflow images inside the 'My Team' workspace panel to display items in this catalog strip dynamically.")
 
