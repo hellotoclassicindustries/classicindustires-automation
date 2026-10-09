@@ -275,14 +275,18 @@ else:
                             st.cache_data.clear()
                             st.rerun()
 
-                # Formulas Reference block - Completely cleaned LaTeX strings
+                # Formulas Reference block - Clean LaTeX code with zero outer wrappers using \(\mathrm\)
         st.html("<hr>")
         st.markdown("### 🧮 Calculation Formulas")
         f_col1, f_col2, f_col3 = st.columns(3)
         
         with f_col1:
             st.markdown("**1. Per Minute Rate Engine**")
-            st.latex(r"\(\text{Rate Per Min} = \frac{\text{Base Monthly Comp} / \text{Days In Month}}{\text{Shift Hours} \times 60}\)")
+            st.latex(
+                r"\(\mathrm{Rate\ Per\ Min} =\) "
+                r"\(\frac{\mathrm{Base\ Monthly\ Comp} / \mathrm{Days\ In\ Month}}\)"
+                r"\({\mathrm{Shift\ Hours} \times 60}\)"
+            )
             with st.expander("🔍 View Example Verification Details"):
                 st.markdown("""
                 ##### 📐 In-Memory Precision: Time String Expansion
@@ -290,30 +294,30 @@ else:
                 * **Extraction Check:** An entry like `11/30` splits into `11` hours and `30` minutes.
                 * **Fractional Math Calculation:**
                 """)
-                st.latex(r"\(\frac{30}{60} = 0.5\text{ Hours}\)")
+                st.latex(r"\(\frac{30}{60} = 0.5\mathrm{\ Hours}\)")
                 st.markdown("* **Decimal Aggregation Payout:**")
-                st.latex(r"\(11 + 0.5 = 11.5\text{ Hours}\)")
+                st.latex(r"\(11 + 0.5 = 11.5\mathrm{\ Hours}\)")
                 
         with f_col2:
             st.markdown("**2. Proportional Days Math**")
-            st.latex(r"\(\text{Actual Days Worked} = \frac{\text{Total Hours Worked}}{\text{Shift Hours}}\)")
+            st.latex(r"\(\mathrm{Actual\ Days\ Worked} = \frac{\mathrm{Total\ Hours\ Worked}}{\mathrm{Shift\ Hours}}\)")
             with st.expander("🔍 View Consistency Proof"):
                 st.markdown("""
                 ##### 📈 Mathematical Consistency Proof
                 * **Total Hours Context:** If an employee logs two separate `11/30` entries, the system computes:
                 """)
-                st.latex(r"\(11.5 + 11.5 = 23.0\text{ Hours}\)")
+                st.latex(r"\(11.5 + 11.5 = 23.0\mathrm{\ Hours}\)")
                 st.markdown("* **Overtime Context:** Against an 8-hour shift, working `11/30` (11.5 hours) yields exactly:")
-                st.latex(r"\(11.5 - 8.0 = 3.5\text{ Overtime Hours}\)")
+                st.latex(r"\(11.5 - 8.0 = 3.5\mathrm{\ Overtime\ Hours}\)")
                 st.markdown("Two such days accumulate to exactly **7.0 hours** of overtime, with no minutes lost.")
                 
         with f_col3:
             st.markdown("**3. Consolidated Gross Payout**")
-            st.latex(r"\(\text{Gross Payout} = \text{Total Hours Worked} \times \text{Rate Per Hour}\)")
+            st.latex(r"\(\mathrm{Gross\ Payout} = \mathrm{Total\ Hours\ Worked} \times \mathrm{Rate\ Per\ Hour}\)")
             with st.expander("🔍 View Payout Math Example"):
                 st.markdown("""
                 ##### 💰 Example Calculation Breakdown
-                * **Hourly Sourcing:** Uses the exact derived `Rate Per Hour` multiplied directly by logged hours.
+                * **Hourly Sourcing:** Uses the exact derived `Rate_Per_Hour` multiplied directly by logged hours.
                 * **Precision Enforced:** Rounded using standard system precision matrix definitions to ensure zero leakage.
                 """)
 
