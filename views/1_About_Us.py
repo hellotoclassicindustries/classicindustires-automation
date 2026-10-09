@@ -186,7 +186,7 @@ with tab_services:
                 st.image(file_src_path, use_container_width=False, width=120)
                 st.markdown(
                     f"<p style='text-align:center; font-weight:600; "
-                    f"font-size:12px; color:#2D3748; margin-top:4px;'>"
+                    f"font-size:12px; color:#2D3748; margin-top:8px;'>"
                     f"{display_label}</p>", 
                     unsafe_allow_html=True
                 )
