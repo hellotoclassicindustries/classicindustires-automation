@@ -162,13 +162,14 @@ with tab_services:
             st.info("📷 **Grinding Thumbnail Asset Pending**")
         st.markdown("#### 🪚 Industrial Grinding & Linishing")
 # ============================================================================
-# VIEWS/1_ABOUT_US.PY - PART 5
-# TEAM TAB INTEGRATION, DYNAMIC IMAGE UPLOADS AND COLLATERAL CARD GRID
+# VIEWS/1_ABOUT_US.PY - PART 5 (ROOT PATH REFIXED)
+# TEAM TAB INTEGRATION, ROOT DIRECTORY IMAGE UPLOADS AND CARD GRID
 # ============================================================================
 
 with tab_team:
-    st.markdown("### 👥 Dynamic Team Profile Gallery")
+    st.markdown("### 👥 Dynamic Team Profile Gallery Workspace")
     
+    # 1. Cloud-accessible file upload selector interface
     uploaded_img = st.file_uploader(
         "Upload New Team Profile Member Photo:",
         type=["jpg", "jpeg", "png"],
@@ -176,15 +177,20 @@ with tab_team:
     )
     
     if uploaded_img is not None:
+        # Safe string cleaning converting filename text structures safely
         target_filename = uploaded_img.name.strip().replace(" ", "_")
+        
+        # Fixed destination filepath pointing out to the true global root gallery
         destination_filepath = os.path.join(GALLERY_DIR, target_filename)
         
+        # 2. Check if file exists locally in the deployed root folder space
         if not os.path.exists(destination_filepath):
             with st.spinner("Processing image to predefined square layout sizes..."):
                 processed_bitmap = process_to_square_size(uploaded_img, target_size=250)
                 if processed_bitmap is not None:
+                    # Persists file inside the absolute root gallery folder directory
                     processed_bitmap.save(destination_filepath, format="JPEG")
-                    st.success(f"✓ Added `{target_filename}` successfully to cloud memory container storage!")
+                    st.success(f"✓ Added `{target_filename}` successfully to root gallery asset database!")
                     st.rerun()
         else:
             st.info(f"ℹ️ Profile asset named `{target_filename}` matches an already tracked profile record file layout.")
@@ -192,12 +198,15 @@ with tab_team:
     st.markdown("---")
     st.write("#### 👥 Active Line Team Members Roster")
     
+    # 3. Read gallery files relative to the refixed absolute global root directory pathing
     gallery_files = [f for f in os.listdir(GALLERY_DIR) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
     
     if gallery_files:
+        # Render clean Streamlit responsive column blocks for absolute cloud server stability
         cols = st.columns(5)
         for idx, filename in enumerate(sorted(gallery_files)):
             file_src_path = os.path.join(GALLERY_DIR, filename)
+            # Make label human-readable from file name configuration rules
             display_label = os.path.splitext(filename)[0].replace("_", " ").title()
             
             with cols[idx % 5]:
