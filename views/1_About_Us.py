@@ -181,12 +181,12 @@ with tab_services:
             file_src_path = os.path.join(GALLERY_DIR, filename)
             display_label = os.path.splitext(filename)[0].replace("_", " ").title()
             
-            with running_cols[idx % 5]:
+            with running_cols[idx % 8]:
                 # Option A: Compact native container framework check
                 st.image(file_src_path, use_container_width=False, width=120)
                 st.markdown(
                     f"<p style='text-align:center; font-weight:600; "
-                    f"font-size:12px; color:#2D3748; margin-top:8px;'>"
+                    f"font-size:12px; color:#2D3748; margin-top:4px;'>"
                     f"{display_label}</p>", 
                     unsafe_allow_html=True
                 )
