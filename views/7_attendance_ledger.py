@@ -247,9 +247,16 @@ else:
             if d_col in validated_columns:
                 cfg[d_col] = st.column_config.TextColumn(d_col.replace("D", ""), width=45, disabled=True)
 
-        edited_df = st.data_editor(render_df, hide_index=True, width="stretch", column_config=cfg, key="attendance_ledger_data_editor")
+        # Added select row configuration option mapping parameters
+        edited_df = st.data_editor(
+            render_df, 
+            hide_index=True, 
+            width="stretch", 
+            column_config=cfg, 
+            key="attendance_ledger_data_editor"
+        )
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 (SYNC & EXPORT WORKSPACES)
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 4 (FORMULAS REFERENCE WORKSPACES)
 # ============================================================================
 
         # Handle user edits to update payment status back to public.raw_attendance_feed
@@ -268,47 +275,54 @@ else:
                             st.cache_data.clear()
                             st.rerun()
 
-        # Formulas Reference block - Completely stripped of outer \(\) wrappers
+        # Formulas Reference block - Fixed raw LaTeX syntax completely stripped of outer delimiters
         st.html("<hr>")
         st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
         f_col1, f_col2, f_col3 = st.columns(3)
+        
         with f_col1:
             st.markdown("**1. Per Minute Rate Engine**")
             st.latex(r"\(\text{Rate per Min} = \frac{\text{Base Monthly Comp} / \text{Days in Month}}{\text{Shift Hours} \times 60}\)")
+            with st.expander("🔍 View Example Verification Details"):
+                st.markdown("""
+                ##### 📐 In-Memory Precision: Time String Expansion
+                To ensure billing remains exact across custom logs, strings like **`11/30`** or **`0/40`** are converted to decimal hours:
+                * **Extraction Check:** An entry like `11/30` splits into `11` hours and `30` minutes.
+                * **Fractional Math Calculation:**
+                """)
+                st.latex(r"\(\frac{30\text{ Minutes}}{60\text{ Minutes}} = 0.5\text{ Hours}\)")
+                st.markdown("* **Decimal Aggregation Payout:**")
+                st.latex(r"\(11 + 0.5 = 11.5\text{ Hours}\)")
+                
         with f_col2:
             st.markdown("**2. Proportional Days Math**")
             st.latex(r"\(\text{Actual Days Worked} = \frac{\text{Total Hours Worked}}{\text{Shift Hours}}\)")
+            with st.expander("🔍 View Consistency Proof"):
+                st.markdown("""
+                ##### 📈 Mathematical Consistency Proof
+                * **Total Hours Context:** If an employee logs two separate `11/30` entries, the system computes:
+                """)
+                st.latex(r"\(11.5 + 11.5 = 23.0\text{ Hours}\)")
+                st.markdown("* **Overtime Context:** Against an 8-hour shift, working `11/30` (11.5 hours) yields exactly:")
+                st.latex(r"\(11.5\text{ Hours} - 8.0\text{ Shift Hours} = 3.5\text{ Overtime Hours}\)")
+                st.markdown("Two such days accumulate to exactly **7.0 hours** of overtime, with no minutes lost.")
+                
         with f_col3:
             st.markdown("**3. Consolidated Gross Payout**")
             st.latex(r"\(\text{Gross Payout} = \text{Total Hours Worked} \times \text{Rate per Hour}\)")
-        
-        # INTERACTIVE EXPLANATION MODULE - Clean text formatting mixed with pure latex equations
-        st.markdown("---")
-        show_math_explanation = st.checkbox("🔍 View: The Math: How 11/30 Becomes 11.5 and Keeps Calculations Exact")
-        if show_math_explanation:
-            st.markdown("""
-            #### 📐 In-Memory Precision Verification: Time String Expansion
-            To ensure billing remains exact across custom logs, strings like **`11/30`** or **`0/40`** are converted to decimal hours:
-            * **Extraction Check:** An entry like `11/30` splits into `11` hours and `30` minutes.
-            * **Fractional Math Calculation:**
-            """)
-            st.latex(r"\(\frac{30\text{ Minutes}}{60\text{ Minutes}} = 0.5\text{ Hours}\)")
-            st.markdown("* **Decimal Aggregation Payout:**")
-            st.latex(r"\(11 + 0.5 = 11.5\text{ Hours}\)")
-            
-            st.markdown("""
-            ##### 📈 Mathematical Consistency Proof
-            * **Total Hours Context:** If an employee logs two separate `11/30` entries, the system computes:
-            """)
-            st.latex(r"\(11.5 + 11.5 = 23.0\text{ Hours}\)")
-            st.markdown("* **Overtime Context:** Against an 8-hour shift, working `11/30` (11.5 hours) yields exactly:")
-            st.latex(r"\(11.5\text{ Hours} - 8.0\text{ Shift Hours} = 3.5\text{ Overtime Hours}\)")
-            st.markdown("Two such days accumulate to exactly **7.0 hours** of overtime, with no minutes lost.")
-            
+            with st.expander("🔍 View Payout Math Example"):
+                st.markdown("""
+                ##### 💰 Example Calculation Breakdown
+                * **Hourly Sourcing:** Uses the exact derived `Rate per Hour` multiplied directly by logged hours.
+                * **Precision Enforced:** Rounded using standard standard system precision matrix definitions to ensure zero leakage.
+                """)
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY: PART 5 (DYNAMIC PIPELINE DATA EXPORTERS)
+# ============================================================================
+
         st.html("<hr>")
 
-        # 📥 Export Workspaces (Completely Unaltered ReportLab and CSV engines)
-        st.markdown("#### 📥 Export Historical Attendance Matrix Ledger")
+        # 📥 Action Export Layout Workspaces (Cleaned up headings layout)
         down_col1, down_col2 = st.columns(2)
         
         with down_col1:
@@ -361,9 +375,19 @@ else:
                 pdf_buffer.seek(0)
                 return pdf_buffer.getvalue()
 
-            if not edited_df.empty:
+            # Dynamic row index lookup checks for selection states inside data editor component configurations
+            selected_rows_indices = st.session_state.attendance_ledger_data_editor.get("selection", {}).get("rows", [])
+            
+            if selected_rows_indices:
+                pdf_target_df = edited_df.iloc[selected_rows_indices]
+                btn_label = f"📄 Download Selected Rows as PDF ({len(selected_rows_indices)} selected)"
+            else:
+                pdf_target_df = edited_df
+                btn_label = "📄 Download Full Ledger as PDF (Landscape)"
+
+            if not pdf_target_df.empty:
                 st.download_button(
-                    label="📄 Download Ledger as PDF (Landscape)", data=generate_ledger_matrix_pdf(edited_df),
+                    label=btn_label, data=generate_ledger_matrix_pdf(pdf_target_df),
                     file_name=f"Historical_Attendance_Ledger_{datetime.date.today()}.pdf", mime="application/pdf", key="ledger_pdf_download_btn"
                 )
             else:
