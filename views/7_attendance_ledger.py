@@ -275,10 +275,12 @@ def fetch_attendance_records():
             headers=HEADERS,
             timeout=30,
         )
-
-        if response.status_code == 200:
-            return response.json()
-
+        if response.status_code in (200, 201):
+            try:
+                return True, response.json()
+            except ValueError:
+                return True, []
+     
         st.error(
             "Unable to load attendance ledger. "
             f"HTTP {response.status_code}: "
