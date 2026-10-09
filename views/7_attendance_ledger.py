@@ -53,19 +53,42 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+SOURCE_IDENTIFIER = "STREAMLIT_LIVE_UI"
+
+APP_USER = (
+    st.session_state.get("user_name")
+    or st.session_state.get("username")
+    or "Streamlit User"
+)
+
+ADJUSTMENT_RATE_UNITS = [
+    "Per Hour",
+    "Per Day",
+    "Per Shift",
+    "Per Task",
+    "Per Load",
+    "Fixed",
+]
+
+ADJUSTMENT_STATUSES = [
+    "Pending",
+    "Approved",
+]
+
 
 # ============================================================================
-# GLOBAL HELPERS
+# GENERAL HELPERS
 # ============================================================================
 
 def safe_float(value):
     """Safely convert a value to float."""
+
     if value is None:
         return 0.00
 
     value_text = str(value).strip()
 
-    if value_text == "" or value_text.lower() == "none":
+    if value_text == "" or value_text.lower() in ["none", "nan"]:
         return 0.00
 
     try:
@@ -74,14 +97,197 @@ def safe_float(value):
         return 0.00
 
 
+def money(value):
+    """Return a value rounded to two decimal places."""
+
+    return round(safe_float(value), 2)
+
+
+def normalise_employee_id(value):
+    """Normalise employee IDs for comparison and database use."""
+
+    if value is None:
+        return ""
+
+    value_text = str(value).strip()
+
+    if value_text.endswith(".0"):
+        value_text = value_text[:-2]
+
+    return value_text
+
+
+def parse_row_date(month_year_value):
+    """
+    Convert supported month formats into datetime.date(year, month, 1).
+
+    Supported examples:
+        2026-09
+        09-2026
+        September-2026
+        September/2026
+    """
+
+    if month_year_value is None:
+        return None
+
+    month_year_text = str(month_year_value).strip()
+
+    if not month_year_text:
+        return None
+
+    if month_year_text.upper() == "N/A":
+        return None
+
+    normalized = month_year_text.replace("/", "-")
+    normalized_upper = normalized.upper()
+
+    year_match = re.search(r"\b(20\d{2})\b", normalized)
+
+    if year_match:
+        year = int(year_match.group(1))
+    else:
+        year = datetime.date.today().year
+
+    # Check month names first.
+    for month_number in range(1, 13):
+        full_month_name = calendar.month_name[month_number].upper()
+        short_month_name = calendar.month_abbr[month_number].upper()
+
+        if (
+            full_month_name in normalized_upper
+            or short_month_name in normalized_upper
+        ):
+            return datetime.date(year, month_number, 1)
+
+    # Handle YYYY-MM.
+    year_month_match = re.search(
+        r"\b(20\d{2})-(0[1-9]|1[0-2])\b",
+        normalized,
+    )
+
+    if year_month_match:
+        return datetime.date(
+            int(year_month_match.group(1)),
+            int(year_month_match.group(2)),
+            1,
+        )
+
+    # Handle numeric formats such as 09-2026.
+    numeric_values = re.findall(r"\b(\d{1,2})\b", normalized)
+
+    for numeric_value in numeric_values:
+        month_number = int(numeric_value)
+
+        if 1 <= month_number <= 12:
+            return datetime.date(year, month_number, 1)
+
+    return None
+
+
+def canonical_month_year(month_year_value):
+    """
+    Convert a month value into the database format YYYY-MM.
+    """
+
+    row_date = parse_row_date(month_year_value)
+
+    if row_date is None:
+        return None
+
+    return row_date.strftime("%Y-%m")
+
+
+def display_month_year(month_year_value):
+    """Convert YYYY-MM into a readable month label."""
+
+    row_date = parse_row_date(month_year_value)
+
+    if row_date is None:
+        return str(month_year_value or "N/A")
+
+    return row_date.strftime("%B-%Y")
+
+
+def get_days_in_month(month_year_value):
+    """Return the number of days in a payroll month."""
+
+    row_date = parse_row_date(month_year_value)
+
+    if row_date:
+        return calendar.monthrange(
+            row_date.year,
+            row_date.month,
+        )[1]
+
+    return 31
+
+
+def calculate_extra_work_payment(
+    quantity,
+    rate,
+    rate_unit,
+):
+    """
+    Calculate extra-work payment in Streamlit memory.
+
+    For Fixed, the rate is treated as the complete fixed payment.
+    For all other units, payment equals quantity multiplied by rate.
+    """
+
+    quantity = max(0.00, safe_float(quantity))
+    rate = max(0.00, safe_float(rate))
+
+    if rate_unit == "Fixed":
+        return money(rate)
+
+    return money(quantity * rate)
+
+
+def calculate_final_net_payable(
+    regular_gross_payout,
+    extra_work_payment,
+    advance_given,
+):
+    """
+    Calculate final net payable in Streamlit memory.
+    """
+
+    regular_gross_payout = max(
+        0.00,
+        safe_float(regular_gross_payout),
+    )
+
+    extra_work_payment = max(
+        0.00,
+        safe_float(extra_work_payment),
+    )
+
+    advance_given = max(
+        0.00,
+        safe_float(advance_given),
+    )
+
+    return money(
+        regular_gross_payout
+        + extra_work_payment
+        - advance_given
+    )
+
+
+# ============================================================================
+# SUPABASE DATA FUNCTIONS
+# ============================================================================
+
 @st.cache_data(ttl=2)
 def fetch_vw_attendance_ledger():
-    """Fetch attendance ledger records from the Supabase view."""
+    """Fetch attendance ledger records."""
 
     endpoint = (
         f"{SUPABASE_URL.strip('/')}"
         "/rest/v1/vw_attendance_ledger"
-        "?order=month_year.desc,employee_id.asc"
+        "?select=*"
+        "&order=month_year.desc,employee_id.asc"
     )
 
     try:
@@ -95,17 +301,109 @@ def fetch_vw_attendance_ledger():
             return response.json()
 
         st.warning(
-            f"Attendance ledger request failed with HTTP "
-            f"status {response.status_code}."
+            "Attendance ledger request failed with HTTP "
+            f"status {response.status_code}: "
+            f"{response.text[:300]}"
         )
+
         return []
 
     except requests.RequestException as error:
-        st.warning(f"Unable to connect to the attendance database: {error}")
+        st.warning(
+            f"Unable to connect to the attendance database: {error}"
+        )
         return []
 
 
-def update_db_payment_status(employee_id, month_year, new_status):
+@st.cache_data(ttl=2)
+def fetch_payroll_adjustments():
+    """Fetch live payroll adjustment records."""
+
+    endpoint = (
+        f"{SUPABASE_URL.strip('/')}"
+        "/rest/v1/payroll_adjustments_live"
+        "?select=*"
+        "&order=month_year.desc,employee_id.asc"
+    )
+
+    try:
+        response = requests.get(
+            endpoint,
+            headers=HEADERS,
+            timeout=30,
+        )
+
+        if response.status_code == 200:
+            return response.json()
+
+        st.warning(
+            "Payroll adjustment request failed with HTTP "
+            f"status {response.status_code}: "
+            f"{response.text[:300]}"
+        )
+
+        return []
+
+    except requests.RequestException as error:
+        st.warning(
+            f"Unable to load payroll adjustments: {error}"
+        )
+        return []
+
+
+def save_payroll_adjustment(adjustment_payload):
+    """
+    Insert or update one employee/month adjustment.
+
+    The database unique constraint is:
+
+        employee_id + month_year
+    """
+
+    endpoint = (
+        f"{SUPABASE_URL.strip('/')}"
+        "/rest/v1/payroll_adjustments_live"
+        "?on_conflict=employee_id,month_year"
+    )
+
+    upsert_headers = {
+        **HEADERS,
+        "Prefer": (
+            "resolution=merge-duplicates,"
+            "return=representation"
+        ),
+    }
+
+    try:
+        response = requests.post(
+            endpoint,
+            headers=upsert_headers,
+            json=adjustment_payload,
+            timeout=30,
+        )
+
+        if response.status_code in (200, 201):
+            try:
+                response_data = response.json()
+            except ValueError:
+                response_data = []
+
+            return True, response_data
+
+        return False, (
+            f"HTTP {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+    except requests.RequestException as error:
+        return False, str(error)
+
+
+def update_db_payment_status(
+    employee_id,
+    month_year,
+    new_status,
+):
     """Update payment status in raw_attendance_feed."""
 
     endpoint = (
@@ -116,7 +414,7 @@ def update_db_payment_status(employee_id, month_year, new_status):
     )
 
     payload = {
-        "payment_status": new_status
+        "payment_status": new_status,
     }
 
     try:
@@ -127,81 +425,55 @@ def update_db_payment_status(employee_id, month_year, new_status):
             timeout=30,
         )
 
-        return response.status_code in [200, 201, 204]
+        return response.status_code in (200, 201, 204)
 
     except requests.RequestException:
         return False
 
 
-def parse_row_date(month_year_value):
+def build_adjustment_lookup(adjustment_records):
     """
-    Convert values such as:
-    September-2026
-    September/2026
-    09-2026
-    into datetime.date(year, month, 1).
+    Build a lookup using:
+
+        normalised employee_id + canonical YYYY-MM month
     """
 
-    if month_year_value is None:
-        return None
+    lookup = {}
 
-    month_year_text = str(month_year_value).strip()
+    for record in adjustment_records or []:
+        employee_id = normalise_employee_id(
+            record.get("employee_id")
+        )
 
-    if not month_year_text or month_year_text.upper() == "N/A":
-        return None
+        month_year = canonical_month_year(
+            record.get("month_year")
+        )
 
-    normalized = month_year_text.replace("/", "-")
+        if not employee_id or not month_year:
+            continue
 
-    year_match = re.search(r"\b(20\d{2})\b", normalized)
+        lookup[
+            (
+                employee_id,
+                month_year,
+            )
+        ] = record
 
-    if year_match:
-        year = int(year_match.group(1))
-    else:
-        year = datetime.date.today().year
-
-    normalized_upper = normalized.upper()
-
-    for month_number in range(1, 13):
-        full_month_name = calendar.month_name[month_number].upper()
-        short_month_name = calendar.month_abbr[month_number].upper()
-
-        if (
-            full_month_name in normalized_upper
-            or short_month_name in normalized_upper
-        ):
-            return datetime.date(year, month_number, 1)
-
-    numeric_values = re.findall(r"\b(\d{1,2})\b", normalized)
-
-    for numeric_value in numeric_values:
-        month_number = int(numeric_value)
-
-        if 1 <= month_number <= 12:
-            return datetime.date(year, month_number, 1)
-
-    return None
+    return lookup
 
 
-def get_days_in_month(month_year_value):
-    """Return the actual number of days in the specified month."""
-
-    row_date = parse_row_date(month_year_value)
-
-    if row_date:
-        return calendar.monthrange(
-            row_date.year,
-            row_date.month,
-        )[1]
-
-    return 31
-
+# ============================================================================
+# PDF EXPORT
+# ============================================================================
 
 def generate_ledger_matrix_pdf(dataframe):
-    """
-    Generate a landscape PDF from the selected rows and columns.
-    """
+    """Generate a landscape PDF from selected rows and columns."""
 
-    if dataframe is None or dataframe.empty or len(dataframe.columns) == 0:
+    if (
+        dataframe is None
+        or dataframe.empty
+        or len(dataframe.columns) == 0
+    ):
         return b""
 
     pdf_buffer = io.BytesIO()
@@ -245,16 +517,13 @@ def generate_ledger_matrix_pdf(dataframe):
         alignment=1,
     )
 
-    story = []
-
-    story.append(
+    story = [
         Paragraph(
             "Payroll & Attendance Ledger",
             title_style,
-        )
-    )
-
-    story.append(Spacer(1, 10))
+        ),
+        Spacer(1, 10),
+    ]
 
     headers = list(dataframe.columns)
 
@@ -293,7 +562,11 @@ def generate_ledger_matrix_pdf(dataframe):
 
     available_width = 752
     column_count = len(headers)
-    column_width = max(20, available_width / column_count)
+
+    column_width = max(
+        20,
+        available_width / max(column_count, 1),
+    )
 
     ledger_table = Table(
         table_data,
@@ -370,10 +643,15 @@ def generate_ledger_matrix_pdf(dataframe):
 
 
 # ============================================================================
-# LOAD ATTENDANCE DATA
+# LOAD DATABASE DATA
 # ============================================================================
 
 view_records_data = fetch_vw_attendance_ledger()
+adjustment_records_data = fetch_payroll_adjustments()
+
+adjustment_lookup = build_adjustment_lookup(
+    adjustment_records_data
+)
 
 if not view_records_data:
     st.info(
@@ -384,7 +662,7 @@ if not view_records_data:
 
 
 # ============================================================================
-# PAYROLL & ATTENDANCE FILTERS
+# PAYROLL FILTERS
 # ============================================================================
 
 today = datetime.date.today()
@@ -449,12 +727,25 @@ with filter_col3:
 processed_rows = []
 
 for item in view_records_data:
-    month_year = item.get("month_year") or "N/A"
-    row_date = parse_row_date(month_year)
+    original_month_year = item.get("month_year") or "N/A"
+
+    row_date = parse_row_date(original_month_year)
+    database_month_year = canonical_month_year(
+        original_month_year
+    )
 
     if row_date:
         if not (start_cal <= row_date <= end_cal):
             continue
+
+    employee_id_text = normalise_employee_id(
+        item.get("employee_id")
+    )
+
+    employee_name = (
+        item.get("employee_name")
+        or "Unnamed"
+    )
 
     total_hours_worked = safe_float(
         item.get("total_hours")
@@ -487,11 +778,14 @@ for item in view_records_data:
         2,
     )
 
-    month_days = get_days_in_month(month_year)
+    month_days = get_days_in_month(
+        original_month_year
+    )
 
     if configured_shift_hours > 0:
         actual_days_worked = round(
-            total_hours_worked / configured_shift_hours,
+            total_hours_worked
+            / configured_shift_hours,
             2,
         )
     else:
@@ -503,10 +797,10 @@ for item in view_records_data:
         and configured_shift_hours > 0
     ):
         daily_allocation_rate = (
-            base_monthly_comp / float(month_days)
+            base_monthly_comp
+            / float(month_days)
         )
 
-        # Round hourly rate upward to the nearest penny.
         per_hour_rate = (
             math.ceil(
                 (
@@ -516,7 +810,6 @@ for item in view_records_data:
             ) / 100.0
         )
 
-        # Round per-minute rate upward to four decimal places.
         per_minute_rate = (
             math.ceil(
                 (per_hour_rate / 60.0) * 10000
@@ -533,12 +826,47 @@ for item in view_records_data:
         per_minute_rate = 0.00
         calculated_gross_payout = 0.00
 
+    adjustment = adjustment_lookup.get(
+        (
+            employee_id_text,
+            database_month_year,
+        ),
+        {},
+    )
+
+    adjustment_quantity = safe_float(
+        adjustment.get("extra_work_quantity")
+    )
+
+    adjustment_rate = safe_float(
+        adjustment.get("extra_work_rate")
+    )
+
+    adjustment_payment = safe_float(
+        adjustment.get("extra_work_payment")
+    )
+
+    adjustment_advance = safe_float(
+        adjustment.get("advance_given")
+    )
+
+    final_net_payable = calculate_final_net_payable(
+        calculated_gross_payout,
+        adjustment_payment,
+        adjustment_advance,
+    )
+
     row_dict = {
-        "Month_Year": month_year,
-        "EMP_ID": item.get("employee_id") or "N/A",
-        "EMP_Name": item.get("employee_name") or "Unnamed",
-        "Over_Time": safe_float(item.get("over_time")),
-        "Less_Time": safe_float(item.get("less_time")),
+        "Month_Year": original_month_year,
+        "DB_Month_Year": database_month_year,
+        "EMP_ID": employee_id_text or "N/A",
+        "EMP_Name": employee_name,
+        "Over_Time": safe_float(
+            item.get("over_time")
+        ),
+        "Less_Time": safe_float(
+            item.get("less_time")
+        ),
         "Total_Hours": total_hours_worked,
         "Total_Minutes": total_minutes_worked,
         "Total_Days": total_days_worked,
@@ -550,7 +878,35 @@ for item in view_records_data:
         "Rate_Per_Hour": per_hour_rate,
         "Rate_Per_Minute": per_minute_rate,
         "Gross_Payout": calculated_gross_payout,
-        "Payment_Status": item.get("payment_status") or "Pending",
+        "Extra_Work_Type": (
+            adjustment.get("extra_work_type")
+            or ""
+        ),
+        "Extra_Work_Quantity": adjustment_quantity,
+        "Extra_Work_Rate": adjustment_rate,
+        "Rate_Unit": (
+            adjustment.get("rate_unit")
+            or "Fixed"
+        ),
+        "Extra_Work_Payment": adjustment_payment,
+        "Advance_Given": adjustment_advance,
+        "Final_Net_Payable": final_net_payable,
+        "Adjustment_Status": (
+            adjustment.get("adjustment_status")
+            or "No UI Adjustment"
+        ),
+        "Adjustment_Source": (
+            adjustment.get("source_identifier")
+            or "NO_UI_ADJUSTMENT"
+        ),
+        "Adjustment_Notes": (
+            adjustment.get("adjustment_notes")
+            or ""
+        ),
+        "Payment_Status": (
+            item.get("payment_status")
+            or "Pending"
+        ),
         "DB_Show_Flag": (
             item.get("show")
             if item.get("show") is not None
@@ -561,8 +917,13 @@ for item in view_records_data:
     for day_number in range(1, 32):
         day_column = f"D{day_number:02d}"
 
-        if days_list and day_number - 1 < len(days_list):
-            row_dict[day_column] = days_list[day_number - 1]
+        if (
+            days_list
+            and day_number - 1 < len(days_list)
+        ):
+            row_dict[day_column] = (
+                days_list[day_number - 1]
+            )
         else:
             row_dict[day_column] = ""
 
@@ -573,546 +934,334 @@ df = pd.DataFrame(processed_rows)
 
 
 # ============================================================================
-# ATTENDANCE LEDGER TABLE
+# PAYROLL ADJUSTMENT SECTION
 # ============================================================================
+
+st.markdown("---")
+st.header("💰 Payroll Adjustment")
 
 if df.empty:
     st.warning(
-        "⚠️ No attendance records match the selected date range."
+        "No attendance records are available for "
+        "the selected payroll month."
     )
-    st.stop()
+else:
+    adjustment_source_df = df[
+        df["DB_Show_Flag"] == True
+    ].copy()
 
-
-filtered_df = df[df["DB_Show_Flag"] == True].copy()
-
-if search_mat_id:
-    filtered_df = filtered_df[
-        filtered_df["EMP_ID"]
-        .astype(str)
-        .str.contains(
-            search_mat_id,
-            case=False,
-            na=False,
+    if adjustment_source_df.empty:
+        st.info(
+            "No visible employees are available for "
+            "the selected payroll month."
         )
-    ]
-
-if search_mat_name:
-    filtered_df = filtered_df[
-        filtered_df["EMP_Name"]
-        .astype(str)
-        .str.contains(
-            search_mat_name,
-            case=False,
-            na=False,
-        )
-    ]
-
-if search_mat_status == "Active Only":
-    filtered_df = filtered_df[
-        filtered_df["EMP_Status"]
-        .astype(str)
-        .str.upper()
-        == "ACTIVE"
-    ]
-
-elif search_mat_status == "In-Active Only":
-    filtered_df = filtered_df[
-        filtered_df["EMP_Status"]
-        .astype(str)
-        .str.upper()
-        == "IN-ACTIVE"
-    ]
-
-
-if filtered_df.empty:
-    st.warning(
-        "⚠️ No ledger records match the active filters."
-    )
-    st.stop()
-
-
-all_day_columns = [
-    f"D{day_number:02d}"
-    for day_number in range(1, 32)
-]
-
-grid_columns_order = (
-    [
-        "Month_Year",
-        "EMP_ID",
-        "EMP_Name",
-    ]
-    + all_day_columns
-    + [
-        "Over_Time",
-        "Less_Time",
-        "Total_Hours",
-        "Total_Minutes",
-        "Total_Days",
-        "Actual_Days_Worked",
-        "Base_Monthly_Comp",
-        "Rate_Per_Hour",
-        "Rate_Per_Minute",
-        "Gross_Payout",
-        "Payment_Status",
-        "Start_Date",
-        "Last_Date",
-        "EMP_Status",
-    ]
-)
-
-validated_columns = [
-    column_name
-    for column_name in grid_columns_order
-    if column_name in filtered_df.columns
-]
-
-render_df = filtered_df[validated_columns].copy()
-
-
-# ============================================================================
-# TABLE COLUMN CONFIGURATION
-# ============================================================================
-
-column_config = {
-    "Month_Year": st.column_config.TextColumn(
-        "Month/Year",
-        width="small",
-        disabled=True,
-    ),
-    "EMP_ID": st.column_config.TextColumn(
-        "Employee ID",
-        width="small",
-        disabled=True,
-    ),
-    "EMP_Name": st.column_config.TextColumn(
-        "Employee Name",
-        width="medium",
-        disabled=True,
-    ),
-    "Over_Time": st.column_config.NumberColumn(
-        "Extra Hrs",
-        format="%.2f",
-        width="small",
-        disabled=True,
-    ),
-    "Less_Time": st.column_config.NumberColumn(
-        "Short Hrs",
-        format="%.2f",
-        width="small",
-        disabled=True,
-    ),
-    "Total_Hours": st.column_config.NumberColumn(
-        "Total Hrs",
-        format="%.2f",
-        width="small",
-        disabled=True,
-    ),
-    "Total_Minutes": st.column_config.NumberColumn(
-        "Total Minutes",
-        format="%.2f",
-        width="small",
-        disabled=True,
-    ),
-    "Total_Days": st.column_config.NumberColumn(
-        "Raw Days Present",
-        format="%.0f",
-        width="small",
-        disabled=True,
-    ),
-    "Actual_Days_Worked": st.column_config.NumberColumn(
-        "Actual Days Worked",
-        format="%.2f",
-        width="medium",
-        disabled=True,
-    ),
-    "Base_Monthly_Comp": st.column_config.NumberColumn(
-        "Base Monthly Comp",
-        format="₹%.2f",
-        width="small",
-        disabled=True,
-    ),
-    "Rate_Per_Hour": st.column_config.NumberColumn(
-        "Hourly Rate",
-        format="₹%.2f",
-        width="small",
-        disabled=True,
-    ),
-    "Rate_Per_Minute": st.column_config.NumberColumn(
-        "Per Minute Rate",
-        format="₹%.4f",
-        width="small",
-        disabled=True,
-    ),
-    "Gross_Payout": st.column_config.NumberColumn(
-        "Gross Payout",
-        format="₹%.2f",
-        width="medium",
-        disabled=True,
-    ),
-    "Payment_Status": st.column_config.SelectboxColumn(
-        "Payment Status",
-        width="medium",
-        options=["Pending", "Done"],
-        required=True,
-    ),
-    "Start_Date": st.column_config.TextColumn(
-        "Start Date",
-        width="small",
-        disabled=True,
-    ),
-    "Last_Date": st.column_config.TextColumn(
-        "Last Working Date",
-        width="small",
-        disabled=True,
-    ),
-    "EMP_Status": st.column_config.TextColumn(
-        "Employee Status",
-        width="small",
-        disabled=True,
-    ),
-}
-
-for day_column in all_day_columns:
-    if day_column in validated_columns:
-        column_config[day_column] = st.column_config.TextColumn(
-            day_column.replace("D", ""),
-            width=45,
-            disabled=True,
+    else:
+        employee_rows = (
+            adjustment_source_df
+            .drop_duplicates(
+                subset=["EMP_ID", "EMP_Name"]
+            )
+            .sort_values(
+                by=["EMP_Name", "EMP_ID"]
+            )
         )
 
+        employee_options = {}
 
-# ============================================================================
-# DATA EDITOR
-# ============================================================================
-
-edited_df = st.data_editor(
-    render_df,
-    hide_index=True,
-    width="stretch",
-    column_config=column_config,
-    key="attendance_ledger_data_editor",
-)
-
-
-# ============================================================================
-# PAYMENT STATUS UPDATE
-# ============================================================================
-
-editor_state = st.session_state.get(
-    "attendance_ledger_data_editor",
-    {},
-)
-
-edited_rows = editor_state.get(
-    "edited_rows",
-    {},
-)
-
-if edited_rows:
-    for row_index_text, altered_properties in edited_rows.items():
-        row_index = int(row_index_text)
-
-        if "Payment_Status" not in altered_properties:
-            continue
-
-        if row_index >= len(render_df):
-            continue
-
-        target_employee = render_df.iloc[row_index]["EMP_ID"]
-        target_month = render_df.iloc[row_index]["Month_Year"]
-        updated_status = altered_properties["Payment_Status"]
-
-        with st.spinner(
-            f"Updating payment status for {target_employee}..."
-        ):
-            update_successful = update_db_payment_status(
-                target_employee,
-                target_month,
-                updated_status,
+        for _, employee_row in employee_rows.iterrows():
+            employee_id = normalise_employee_id(
+                employee_row["EMP_ID"]
             )
 
-        if update_successful:
-            st.success(
-                f"✓ Payment status updated to '{updated_status}' "
-                f"for Employee ID: {target_employee}"
+            employee_name = employee_row["EMP_Name"]
+
+            if not employee_id or employee_id == "N/A":
+                continue
+
+            employee_options[employee_id] = (
+                f"{employee_name} "
+                f"(ID: {employee_id})"
             )
 
-            st.cache_data.clear()
-            st.rerun()
+        if not employee_options:
+            st.info(
+                "No valid BIGINT employee IDs are available."
+            )
         else:
-            st.error(
-                f"Unable to update payment status for "
-                f"Employee ID: {target_employee}."
+            adjustment_col1, adjustment_col2 = st.columns(2)
+
+            with adjustment_col1:
+                selected_emp_key = st.selectbox(
+                    "Select Employee",
+                    options=list(
+                        employee_options.keys()
+                    ),
+                    format_func=lambda value: (
+                        employee_options[value]
+                    ),
+                    key="adjustment_employee_select",
+                )
+
+            employee_month_rows = adjustment_source_df[
+                adjustment_source_df["EMP_ID"].astype(str)
+                == str(selected_emp_key)
+            ].copy()
+
+            available_adjustment_months = sorted(
+                [
+                    str(month)
+                    for month in (
+                        employee_month_rows[
+                            "DB_Month_Year"
+                        ]
+                        .dropna()
+                        .unique()
+                    )
+                    if month
+                ],
+                reverse=True,
             )
 
+            with adjustment_col2:
+                selected_adjustment_month = st.selectbox(
+                    "Select Payroll Month",
+                    options=available_adjustment_months,
+                    format_func=display_month_year,
+                    key="adjustment_month_select",
+                )
 
-# ============================================================================
-# PAYROLL & ATTENDANCE WORKFLOW EXPORTS
-# ============================================================================
+            target_canonical_month = (
+                selected_adjustment_month
+            )
 
-st.markdown("---")
-st.header("📤 Payroll & Attendance Workflow Exports")
+            matched_rows = df[
+                (df["EMP_ID"].astype(str) == str(selected_emp_key))
+                & (
+                    df["DB_Month_Year"].astype(str)
+                    == str(target_canonical_month)
+                )
+            ]
 
-export_df = edited_df.copy()
+            if matched_rows.empty:
+                regular_gross_payout = 0.00
+            else:
+                regular_gross_payout = safe_float(
+                    matched_rows.iloc[0]["Gross_Payout"]
+                )
 
-export_col1, export_col2 = st.columns(2)
+            existing_adjustment = adjustment_lookup.get(
+                (
+                    normalise_employee_id(
+                        selected_emp_key
+                    ),
+                    target_canonical_month,
+                ),
+                {},
+            )
 
+            existing_work_type = (
+                existing_adjustment.get(
+                    "extra_work_type"
+                )
+                or ""
+            )
 
-# ============================================================================
-# CSV EXPORT
-# ============================================================================
-
-with export_col1:
-    st.subheader("📊 CSV Export")
-
-    csv_df = export_df.copy()
-
-    # Preserve attendance values such as 11/30 when opened in Excel.
-    for column_name in csv_df.columns:
-        if (
-            column_name.startswith("D")
-            and column_name[1:].isdigit()
-        ):
-            csv_df[column_name] = csv_df[column_name].apply(
-                lambda value: (
-                    f"\t{value}"
-                    if isinstance(value, str)
-                    and "/" in value
-                    else value
+            existing_quantity = safe_float(
+                existing_adjustment.get(
+                    "extra_work_quantity"
                 )
             )
 
-    csv_buffer = io.StringIO()
-    csv_df.to_csv(csv_buffer, index=False)
+            existing_rate = safe_float(
+                existing_adjustment.get(
+                    "extra_work_rate"
+                )
+            )
 
-    st.download_button(
-        label="⬇️ Download Ledger as CSV (Preserve Formats)",
-        data=csv_buffer.getvalue(),
-        file_name=(
-            "Historical_Attendance_Ledger_"
-            f"{datetime.date.today()}.csv"
-        ),
-        mime="text/csv",
-        key="ledger_csv_download_btn",
-    )
+            existing_rate_unit = (
+                existing_adjustment.get(
+                    "rate_unit"
+                )
+                or "Fixed"
+            )
 
+            if existing_rate_unit not in (
+                ADJUSTMENT_RATE_UNITS
+            ):
+                existing_rate_unit = "Fixed"
 
-# ============================================================================
-# PDF EXPORT
-# ============================================================================
+            existing_advance = safe_float(
+                existing_adjustment.get(
+                    "advance_given"
+                )
+            )
 
-with export_col2:
-    st.subheader("📄 PDF Export")
+            existing_notes = (
+                existing_adjustment.get(
+                    "adjustment_notes"
+                )
+                or ""
+            )
 
-    available_pdf_columns = list(export_df.columns)
+            existing_status = (
+                existing_adjustment.get(
+                    "adjustment_status"
+                )
+                or "Approved"
+            )
 
-    default_pdf_columns = [
-        column_name
-        for column_name in [
-            "Month_Year",
-            "EMP_ID",
-            "EMP_Name",
-            "Total_Hours",
-            "Actual_Days_Worked",
-            "Base_Monthly_Comp",
-            "Rate_Per_Hour",
-            "Rate_Per_Minute",
-            "Gross_Payout",
-            "Payment_Status",
-            "EMP_Status",
-        ]
-        if column_name in available_pdf_columns
-    ]
+            if existing_status not in ADJUSTMENT_STATUSES:
+                existing_status = "Approved"
 
-    selected_pdf_columns = st.multiselect(
-        "Select columns to include in the PDF:",
-        options=available_pdf_columns,
-        default=default_pdf_columns,
-        key="ledger_pdf_columns",
-    )
+            st.caption(
+                "Only clicking 'Accept & Save' writes "
+                "the adjustment to Supabase."
+            )
 
-    row_options = []
-    row_lookup = {}
+            form_col1, form_col2, form_col3 = st.columns(3)
 
-    for position, (_, row) in enumerate(export_df.iterrows()):
-        employee_id = row.get("EMP_ID", "N/A")
-        employee_name = row.get("EMP_Name", "Unnamed")
-        month_year = row.get("Month_Year", "N/A")
+            with form_col1:
+                input_work_type = st.text_input(
+                    "Extra Work Type",
+                    value=existing_work_type,
+                    placeholder=(
+                        "Example: Weekend shift"
+                    ),
+                    key="adjustment_work_type_input",
+                )
 
-        label = (
-            f"{position + 1}. "
-            f"{employee_id} - "
-            f"{employee_name} - "
-            f"{month_year}"
-        )
+                input_quantity = st.number_input(
+                    "Extra Work Quantity",
+                    min_value=0.00,
+                    value=existing_quantity,
+                    step=0.01,
+                    format="%.2f",
+                    key="adjustment_quantity_input",
+                )
 
-        row_options.append(label)
-        row_lookup[label] = position
+            with form_col2:
+                input_rate = st.number_input(
+                    "Extra Work Rate",
+                    min_value=0.00,
+                    value=existing_rate,
+                    step=0.01,
+                    format="%.2f",
+                    key="adjustment_rate_input",
+                )
 
-    selected_pdf_row_labels = st.multiselect(
-        "Select rows to include in the PDF:",
-        options=row_options,
-        default=[],
-        help=(
-            "Leave this empty to include all filtered ledger rows."
-        ),
-        key="ledger_pdf_rows",
-    )
+                input_rate_unit = st.selectbox(
+                    "Rate Unit",
+                    options=ADJUSTMENT_RATE_UNITS,
+                    index=ADJUSTMENT_RATE_UNITS.index(
+                        existing_rate_unit
+                    ),
+                    key="adjustment_rate_unit_select",
+                )
 
-    if selected_pdf_row_labels:
-        selected_row_positions = [
-            row_lookup[label]
-            for label in selected_pdf_row_labels
-        ]
+            with form_col3:
+                input_advance = st.number_input(
+                    "Advance Given",
+                    min_value=0.00,
+                    value=existing_advance,
+                    step=0.01,
+                    format="%.2f",
+                    key="adjustment_advance_input",
+                )
 
-        pdf_target_df = export_df.iloc[
-            selected_row_positions
-        ].copy()
-    else:
-        pdf_target_df = export_df.copy()
+                input_status = st.selectbox(
+                    "Adjustment Status",
+                    options=ADJUSTMENT_STATUSES,
+                    index=ADJUSTMENT_STATUSES.index(
+                        existing_status
+                    ),
+                    key="adjustment_status_select",
+                )
 
-    if selected_pdf_columns:
-        pdf_target_df = pdf_target_df[
-            selected_pdf_columns
-        ].copy()
-    else:
-        pdf_target_df = pd.DataFrame()
+            input_notes = st.text_area(
+                "Adjustment Notes",
+                value=existing_notes,
+                placeholder=(
+                    "Enter extra-work and advance notes."
+                ),
+                key="adjustment_notes_input",
+            )
 
-    if not selected_pdf_columns:
-        st.warning(
-            "Select at least one column for the PDF."
-        )
-        pdf_data = b""
+            calculated_extra_payment = (
+                calculate_extra_work_payment(
+                    input_quantity,
+                    input_rate,
+                    input_rate_unit,
+                )
+            )
 
-    elif pdf_target_df.empty:
-        st.warning(
-            "No rows are available for the selected PDF."
-        )
-        pdf_data = b""
+            calculated_net_payable = (
+                calculate_final_net_payable(
+                    regular_gross_payout,
+                    calculated_extra_payment,
+                    input_advance,
+                )
+            )
 
-    else:
-        pdf_data = generate_ledger_matrix_pdf(
-            pdf_target_df
-        )
+            preview_col1, preview_col2 = st.columns(2)
 
-    st.download_button(
-        label="⬇️ Download Ledger as PDF (Landscape)",
-        data=pdf_data,
-        file_name=(
-            "Historical_Attendance_Ledger_"
-            f"{datetime.date.today()}.pdf"
-        ),
-        mime="application/pdf",
-        key="ledger_pdf_download_btn",
-        disabled=not bool(pdf_data),
-    )
+            with preview_col1:
+                st.metric(
+                    "Regular Gross Payout",
+                    f"₹{regular_gross_payout:,.2f}",
+                )
 
+                st.metric(
+                    "Extra-Work Payment",
+                    f"₹{calculated_extra_payment:,.2f}",
+                )
 
-# ============================================================================
-# FORMULAS REFERENCE
-# ============================================================================
+            with preview_col2:
+                st.metric(
+                    "Advance Given",
+                    f"₹{input_advance:,.2f}",
+                )
 
-st.markdown("---")
-st.header("🧮 Calculation Formulas")
+                st.metric(
+                    "Final Net Payable",
+                    f"₹{calculated_net_payable:,.2f}",
+                )
 
-formula_col1, formula_col2, formula_col3 = st.columns(3)
+            if calculated_net_payable < 0:
+                st.warning(
+                    "The advance is greater than the gross payout "
+                    "plus extra-work payment. The calculated net "
+                    "payable is negative."
+                )
 
+            st.info(
+                f"Calculation preview: Regular gross "
+                f"₹{regular_gross_payout:,.2f} + extra work "
+                f"₹{calculated_extra_payment:,.2f} - advance "
+                f"₹{input_advance:,.2f} = final net payable "
+                f"₹{calculated_net_payable:,.2f}"
+            )
 
-with formula_col1:
-    st.markdown("**1. Per Minute Rate Engine**")
+            if st.button(
+                "✅ Accept & Save",
+                type="primary",
+                use_container_width=True,
+                key="save_adjustment_action_btn",
+            ):
+                selected_emp_id_text = (
+                    normalise_employee_id(
+                        selected_emp_key
+                    )
+                )
 
-    st.latex(
-        r"\mathrm{Rate\ Per\ Min} = "
-        r"\frac{"
-        r"\mathrm{Base\ Monthly\ Comp} / \mathrm{Days\ In\ Month}"
-        r"}"
-        r"{\mathrm{Shift\ Hours} \times 60}"
-    )
-
-    with st.expander(
-        "🔍 View Example Verification Details"
-    ):
-        st.markdown("""
-        ##### 📐 In-Memory Precision: Time String Expansion
-
-        Values such as **`11/30`** are interpreted as
-        11 hours and 30 minutes.
-
-        * **Extraction Check:** `11/30` becomes 11 hours and 30 minutes.
-        * **Fractional Math Calculation:**
-        """)
-
-        st.latex(
-            r"\frac{30}{60} = 0.5\ \mathrm{Hours}"
-        )
-
-        st.markdown(
-            "* **Decimal Aggregation Payout:**"
-        )
-
-        st.latex(
-            r"11 + 0.5 = 11.5\ \mathrm{Hours}"
-        )
-
-
-with formula_col2:
-    st.markdown("**2. Proportional Days Math**")
-
-    st.latex(
-        r"\mathrm{Actual\ Days\ Worked} = "
-        r"\frac{"
-        r"\mathrm{Total\ Hours\ Worked}"
-        r"}"
-        r"{\mathrm{Shift\ Hours}}"
-    )
-
-    with st.expander(
-        "🔍 View Consistency Proof"
-    ):
-        st.markdown("""
-        ##### 📈 Mathematical Consistency Proof
-
-        Two separate `11/30` entries produce
-        23 total hours.
-        """)
-
-        st.latex(
-            r"11.5 + 11.5 = 23.0\ \mathrm{Hours}"
-        )
-
-        st.markdown(
-            "Against an 8-hour shift, working `11/30` "
-            "produces:"
-        )
-
-        st.latex(
-            r"11.5 - 8.0 = 3.5\ \mathrm{Overtime\ Hours}"
-        )
-
-        st.markdown(
-            "Two such days produce exactly "
-            "**7.0 hours of overtime**."
-        )
-
-
-with formula_col3:
-    st.markdown("**3. Consolidated Gross Payout**")
-
-    st.latex(
-        r"\mathrm{Gross\ Payout} = "
-        r"\mathrm{Total\ Hours\ Worked} \times "
-        r"\mathrm{Rate\ Per\ Hour}"
-    )
-
-    with st.expander(
-        "🔍 View Payout Math Example"
-    ):
-        st.markdown("""
-        ##### 💰 Example Calculation Breakdown
-
-        * **Hourly Sourcing:** Uses the derived
-          `Rate_Per_Hour` multiplied directly by logged hours.
-        * **Precision Enforced:** Values are rounded according
-          to the configured payroll precision rules.
-        """)
+                if not selected_emp_id_text.isdigit():
+                    st.error(
+                        "The selected employee ID is not a "
+                        "valid BIGINT value."
+                    )
+                elif not target_canonical_month:
+                    st.error(
+                        "A valid payroll month must be selected."
+                    )
+                else:
+                    approved_at = None
+                    approved_by = None
