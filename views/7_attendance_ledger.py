@@ -268,31 +268,31 @@ else:
                             st.cache_data.clear()
                             st.rerun()
 
-        # Formulas Reference block
+        # Formulas Reference block - Fixed using raw strings (r"...") to prevent string leaking
         st.html("<hr>")
         st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
         f_col1, f_col2, f_col3 = st.columns(3)
         with f_col1:
-            st.info("**1. Per Minute Rate Engine**\n\n\[\text{Rate per Min} = \frac{\text{Base Monthly Comp} / \text{Days in Month}}{\text{Shift Hours} \times 60}\]")
+            st.info(r"**1. Per Minute Rate Engine**" + "\n\n" + r"\[\text{Rate per Min} = \frac{\text{Base Monthly Comp} / \text{Days in Month}}{\text{Shift Hours} \times 60}\]")
         with f_col2:
-            st.info("**2. Proportional Days Math**\n\n\[\text{Actual Days Worked} = \frac{\text{Total Hours Worked (From DB)}}{\text{Master Table Shift Hours}}\]")
+            st.info(r"**2. Proportional Days Math**" + "\n\n" + r"\[\text{Actual Days Worked} = \frac{\text{Total Hours Worked (From DB)}}{\text{Master Table Shift Hours}}\]")
         with f_col3:
-            st.info("**3. Consolidated Gross Payout**\n\n\[\text{Gross Payout} = \text{Total Hours Worked} \times \text{Rate per Hour}\]")
+            st.info(r"**3. Consolidated Gross Payout**" + "\n\n" + r"\[\text{Gross Payout} = \text{Total Hours Worked} \times \text{Rate per Hour}\]")
         
-        # 🆕 INJECTED INTERACTIVE EXPLANATION MODULE
+        # FIXED INTERACTIVE EXPLANATION MODULE (Declared as a raw multi-line block)
         st.markdown("---")
         show_math_explanation = st.checkbox("🔍 View: The Math: How 11/30 Becomes 11.5 and Keeps Calculations Exact")
         if show_math_explanation:
-            st.success("""
+            st.success(r"""
             #### 📐 In-Memory Precision Verification: Time String Expansion
             To ensure billing remains exact across custom logs, strings like **`11/30`** or **`0/40`** are converted to decimal hours:
             * **Extraction Check:** An entry like `11/30` splits into `11` hours and `30` minutes.
-            * **Fractional Math:** Minutes are evaluated as: \(\frac{30}{60} = 0.5\text{ Hours}\).
-            * **Decimal Aggregation:** Total value resolves exactly to \(11 + 0.5 = \mathbf{11.5\text{ Hours}}\).
+            * **Fractional Math:** Minutes are evaluated as: \[\frac{30}{60} = 0.5\text{ Hours}\]
+            * **Decimal Aggregation:** Total value resolves exactly to: \[11 + 0.5 = 11.5\text{ Hours}\]
             
             ##### 📈 Mathematical Consistency Proof
-            * **Total Hours Context:** If an employee logs two `11/30` entries, the system computes \(11.5 + 11.5 = \mathbf{23.0\text{ Hours}}\).
-            * **Overtime Context:** Against an 8-hour shift, working `11/30` (11.5 hours) yields exactly \(11.5 - 8 = \mathbf{3.5\text{ Overtime Hours}}\). Two such days accumulate to exactly **7.0 hours** of overtime, with no minutes lost.
+            * **Total Hours Context:** If an employee logs two `11/30` entries, the system computes \[11.5 + 11.5 = 23.0\text{ Hours}\]
+            * **Overtime Context:** Against an 8-hour shift, working `11/30` (11.5 hours) yields exactly \[11.5 - 8 = 3.5\text{ Overtime Hours}\] Two such days accumulate to exactly **7.0 hours** of overtime, with no minutes lost.
             """)
         st.html("<hr>")
 
