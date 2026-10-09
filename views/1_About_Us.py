@@ -1,6 +1,6 @@
 # ============================================================================
-# VIEWS/1_ABOUT_US.PY - PART 1
-# PATH ROUTING RESOLUTION ENGINE, SYSTEM CONSTANTS & CONFIGURATIONS
+# VIEWS/1_ABOUT_US.PY - PART 1 (ROOT PATH REFIXED)
+# CONFIGURATIONS, TRUE REPO ROOT ROUTING UTILITIES & ENGINES
 # ============================================================================
 
 import calendar
@@ -14,9 +14,12 @@ import requests
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 
-# Anchor paths relative to this file to work natively on GitHub/Streamlit Cloud
+# Steps back up out of the views folder to find the root directory level
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-GALLERY_DIR = os.path.join(BASE_DIR, "assets", "gallery")
+REPO_ROOT = os.path.dirname(BASE_DIR) 
+
+# Sets absolute routing mappings targeting the true repository root levels
+GALLERY_DIR = os.path.join(REPO_ROOT, "assets", "gallery")
 os.makedirs(GALLERY_DIR, exist_ok=True)
 
 try:
@@ -41,6 +44,7 @@ APP_USER = (
     or st.session_state.get("username")
     or "Streamlit User"
 )
+
 # ============================================================================
 # VIEWS/1_ABOUT_US.PY - PART 2
 # GRAPHICAL BITMAP TRANSLATION ENGINE & INTERFACING LAYOUT STYLES
@@ -89,19 +93,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 # ============================================================================
-# VIEWS/1_ABOUT_US.PY - PART 3
-# MASTER COMPONENT HEADER & LAYOUT TAB CONFIGURATIONS
+# VIEWS/1_ABOUT_US.PY - PART 3 (ROOT PATH REFIXED)
+# BRAND PRESENTATION HEADER & ROOT HERO ASSET MATRIX TARGETS
 # ============================================================================
 
 st.title("🏢 Classic Industries")
 st.subheader("Foundry Friends & Finishers Division")
 st.markdown("---")
 
-hero_path = os.path.join(BASE_DIR, "assets", "main_hero.jpg")
+# Corrected path mapping pointing directly to the root assets folder
+hero_path = os.path.join(REPO_ROOT, "assets", "main_hero.jpg")
 if os.path.exists(hero_path):
     st.image(
         hero_path, 
-        caption="Classic Industries — Advanced Shop Floor Layout",
+        caption="Classic Industries — Advanced Shop Floor Layout Floor Matrix",
         use_container_width=True
     )
 else:
@@ -111,9 +116,10 @@ st.markdown("---")
 tab_about, tab_services, tab_team = st.tabs(
     ["📋 About Us", "🛠️ Our Services", "👥 My Team"]
 )
+
 # ============================================================================
-# VIEWS/1_ABOUT_US.PY - PART 4
-# BUSINESS INFORMATION PANELS AND CORE WORKFLOW SUB-TABS
+# VIEWS/1_ABOUT_US.PY - PART 4 (ROOT PATH REFIXED)
+# CORE BUSINESS DATA PANELS AND REFIXED ACCESSIBLE SUB-TAB ASSETS
 # ============================================================================
 
 with tab_about:
@@ -125,22 +131,22 @@ with tab_about:
         We operate as a premium, high-volume multi-process jobwork hub optimized to handle raw, rough casting outputs 
         straight out of foundry sand molds. 
         """)
-        st.write("### ⏱ ... Facility Operational Matrix")
+        st.write("### ⏱️ Facility Operational Matrix")
         st.markdown("""
         *   **Company Name:** Classic Industries
         *   **Plant Operations:** 🔄 **24x7 Continuous Production Shifts**
-        *   **Helpdesk Support:** 📞 **08:00 AM – 05:00 PM** (Mon – Sat)
         """)
     with col2:
         st.info("🗺️ **Classic Industries Plant Network**")
-        st.markdown("Our manufacturing plants feature automated capture lines.")
+        st.markdown("Our manufacturing plants feature automated casting scale infrastructure lines.")
 
 with tab_services:
     st.write("### 🛠️ Our Core Industrial Workflows")
     col_fit, col_grind = st.columns(2)
     
     with col_fit:
-        fit_path = os.path.join(BASE_DIR, "assets", "thumb_fitting.jpg")
+        # Corrected absolute routing paths pointing out to the true repo root
+        fit_path = os.path.join(REPO_ROOT, "assets", "thumb_fitting.jpg")
         if os.path.exists(fit_path):
             st.image(fit_path, use_container_width=True)
         else:
@@ -148,11 +154,12 @@ with tab_services:
         st.markdown("#### ⚙️ Precision Fitting Operations")
         
     with col_grind:
-        grind_path = os.path.join(BASE_DIR, "assets", "thumb_grinding.jpg")
+        # Corrected absolute routing paths pointing out to the true repo root
+        grind_path = os.path.join(REPO_ROOT, "assets", "thumb_grinding.jpg")
         if os.path.exists(grind_path):
             st.image(grind_path, use_container_width=True)
         else:
-            st.info("📷 **Grinding Thumbnail Pending Upload**")
+            st.info("📷 **Grinding Thumbnail Asset Pending**")
         st.markdown("#### 🪚 Industrial Grinding & Linishing")
 # ============================================================================
 # VIEWS/1_ABOUT_US.PY - PART 5
