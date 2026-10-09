@@ -268,7 +268,7 @@ else:
                             st.cache_data.clear()
                             st.rerun()
 
-        # Formulas Reference block - Stripped of math brackets to ensure native rendering
+        # Formulas Reference block - Completely stripped of outer \(\) wrappers
         st.html("<hr>")
         st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
         f_col1, f_col2, f_col3 = st.columns(3)
@@ -282,7 +282,7 @@ else:
             st.markdown("**3. Consolidated Gross Payout**")
             st.latex(r"\(\text{Gross Payout} = \text{Total Hours Worked} \times \text{Rate per Hour}\)")
         
-        # INTERACTIVE EXPLANATION MODULE - Standard typography markdown mixed with clean LaTeX elements
+        # INTERACTIVE EXPLANATION MODULE - Clean text formatting mixed with pure latex equations
         st.markdown("---")
         show_math_explanation = st.checkbox("🔍 View: The Math: How 11/30 Becomes 11.5 and Keeps Calculations Exact")
         if show_math_explanation:
