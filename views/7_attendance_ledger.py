@@ -10,6 +10,7 @@ import io
 import re  
 import datetime
 import calendar
+import math
 from dateutil.relativedelta import relativedelta
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -103,7 +104,6 @@ else:
     today = datetime.date.today()
     past_month_date = today - relativedelta(months=1)
     
-    # SYNTAX FIX: Added index slice tracker array selector parameter to unpack standard calendar tuple returns safely
     default_start = past_month_date.replace(day=1)
     default_end = past_month_date.replace(day=int(calendar.monthrange(past_month_date.year, past_month_date.month)[1]))
 
@@ -119,7 +119,7 @@ else:
     else:
         start_cal, end_cal = default_start, default_end
 
-    # Search filter layout columns row - Slider filter removed entirely
+    # Search filter layout columns row
     mat_col1, mat_col2, mat_col4 = st.columns(3)
     with mat_col1:
         search_mat_id = st.text_input("Filter by Employee ID:", "", key="mat_id_input").strip()
@@ -139,7 +139,7 @@ else:
             if not (start_cal <= row_dt <= end_cal):
                 continue
 
-        # DATABASE PRIORITY SOURCING: Pull raw totals straight out of combined view columns map
+        # DATABASE SOURCING: Pull raw data from database view columns
         total_hours_worked = safe_float(item.get("total_hours"))
         total_days_worked = safe_float(item.get("total_days"))  
         base_monthly_comp = safe_float(item.get("base_monthly_comp"))
@@ -147,8 +147,8 @@ else:
         current_status = item.get("employee_status") or "Active"
         days_list = item.get("attendance_days") or []
         
-        # 🧮 IN-MEMORY PAYROLL CALCULATIONS (Pure RAM Math allocations)
-        total_minutes_worked = total_hours_worked * 60.0
+        # 🧮 IN-MEMORY PAYROLL CALCULATIONS (Pure RAM Math with explicit rounding)
+        total_minutes_worked = round(total_hours_worked * 60.0, 2)
         row_month_days = get_days_in_month(m_yr)
 
         if configured_shift_hours > 0:
@@ -157,9 +157,15 @@ else:
             actual_days_worked = 0.00
 
         if current_status.upper() == "ACTIVE" and row_month_days > 0 and configured_shift_hours > 0:
-            per_hour_rate = (base_monthly_comp / float(row_month_days)) / configured_shift_hours
-            per_minute_rate = per_hour_rate / 60.0
-            calculated_gross_payout = total_minutes_worked * per_minute_rate
+            # Calculate daily allocation base
+            daily_allocation_rate = base_monthly_comp / float(row_month_days)
+            
+            # Enforce strict in-memory rounding up for currency rates
+            per_hour_rate = math.ceil((daily_allocation_rate / configured_shift_hours) * 100) / 100.0
+            per_minute_rate = math.ceil((per_hour_rate / 60.0) * 10000) / 10000.0
+            
+            # Final Gross compensation rounded neatly to standard pennies
+            calculated_gross_payout = round(total_hours_worked * per_hour_rate, 2)
         else:
             per_hour_rate = 0.00
             per_minute_rate = 0.00
@@ -172,16 +178,16 @@ else:
             "Over_Time": safe_float(item.get("over_time")),
             "Less_Time": safe_float(item.get("less_time")),
             "Total_Hours": total_hours_worked,
-            "Total_Minutes": total_minutes_worked,             # RAM Calculated Metric
-            "Total_Days": total_days_worked,                   # Raw Days Count from DB
-            "Actual_Days_Worked": actual_days_worked,           # RAM Proportional Calculated Metric
+            "Total_Minutes": total_minutes_worked,             
+            "Total_Days": total_days_worked,                   
+            "Actual_Days_Worked": actual_days_worked,           
             "Start_Date": item.get("start_date") or "N/A",
             "Last_Date": item.get("last_day_of_work") or "N/A",
             "EMP_Status": current_status,
             "Base_Monthly_Comp": base_monthly_comp,
-            "Rate_Per_Hour": per_hour_rate,                    # RAM Calculated Metric
-            "Rate_Per_Minute": per_minute_rate,                # RAM Calculated Metric
-            "Gross_Payout": calculated_gross_payout,           # RAM Calculated Metric
+            "Rate_Per_Hour": per_hour_rate,                    
+            "Rate_Per_Minute": per_minute_rate,                
+            "Gross_Payout": calculated_gross_payout,           
             "Payment_Status": item.get("payment_status") or "Pending",
             "DB_Show_Flag": item.get("show") if item.get("show") is not None else True
         }
@@ -227,7 +233,7 @@ else:
             "Over_Time": st.column_config.NumberColumn("Extra Hrs", format="%.2f", width="small", disabled=True),
             "Less_Time": st.column_config.NumberColumn("Short Hrs", format="%.2f", width="small", disabled=True),
             "Total_Hours": st.column_config.NumberColumn("Total Hrs", format="%.2f", width="small", disabled=True),
-            "Total_Minutes": st.column_config.NumberColumn("Total Min (RAM)", format="%.0f", width="small", disabled=True),
+            "Total_Minutes": st.column_config.NumberColumn("Total Min (RAM)", format="%.2f", width="small", disabled=True),
             "Total_Days": st.column_config.NumberColumn("Raw Days Present", format="%.0f", width="small", disabled=True),
             "Actual_Days_Worked": st.column_config.NumberColumn("Actual Days Worked (Proportional)", format="%.2f", width="medium", disabled=True),
             "Base_Monthly_Comp": st.column_config.NumberColumn("Base Comp Rate", format="₹%.2f", width="small", disabled=True),
@@ -267,14 +273,30 @@ else:
         st.markdown("### 🧮 Workforce Payroll Calculation Formulas")
         f_col1, f_col2, f_col3 = st.columns(3)
         with f_col1:
-            st.info("**1. Per Minute Rate Engine**\n\n$$\\text{Rate per Min} = \\frac{\\text{Base Monthly Comp} / \\text{Days in Month}}{\\text{Shift Hours} \\times 60}$$")
+            st.info("**1. Per Minute Rate Engine**\n\n\[\text{Rate per Min} = \frac{\text{Base Monthly Comp} / \text{Days in Month}}{\text{Shift Hours} \times 60}\]")
         with f_col2:
-            st.info("**2. Proportional Days Math**\n\n$$\\text{Actual Days Worked} = \\frac{\\text{Total Hours Worked (From DB)}}{\\text{Master Table Shift Hours}}$$")
+            st.info("**2. Proportional Days Math**\n\n\[\text{Actual Days Worked} = \frac{\text{Total Hours Worked (From DB)}}{\text{Master Table Shift Hours}}\]")
         with f_col3:
-            st.info("**3. Consolidated Gross Payout**\n\n$$\\text{Gross Payout} = \\text{Total Minutes (RAM)} \\times \\text{Rate per Min}$$")
+            st.info("**3. Consolidated Gross Payout**\n\n\[\text{Gross Payout} = \text{Total Hours Worked} \times \text{Rate per Hour}\]")
+        
+        # 🆕 INJECTED INTERACTIVE EXPLANATION MODULE
+        st.markdown("---")
+        show_math_explanation = st.checkbox("🔍 View: The Math: How 11/30 Becomes 11.5 and Keeps Calculations Exact")
+        if show_math_explanation:
+            st.success("""
+            #### 📐 In-Memory Precision Verification: Time String Expansion
+            To ensure billing remains exact across custom logs, strings like **`11/30`** or **`0/40`** are converted to decimal hours:
+            * **Extraction Check:** An entry like `11/30` splits into `11` hours and `30` minutes.
+            * **Fractional Math:** Minutes are evaluated as: \(\frac{30}{60} = 0.5\text{ Hours}\).
+            * **Decimal Aggregation:** Total value resolves exactly to \(11 + 0.5 = \mathbf{11.5\text{ Hours}}\).
+            
+            ##### 📈 Mathematical Consistency Proof
+            * **Total Hours Context:** If an employee logs two `11/30` entries, the system computes \(11.5 + 11.5 = \mathbf{23.0\text{ Hours}}\).
+            * **Overtime Context:** Against an 8-hour shift, working `11/30` (11.5 hours) yields exactly \(11.5 - 8 = \mathbf{3.5\text{ Overtime Hours}}\). Two such days accumulate to exactly **7.0 hours** of overtime, with no minutes lost.
+            """)
         st.html("<hr>")
 
-        # 📥 Export Workspaces (Completely Unaltered)
+        # 📥 Export Workspaces
         st.markdown("#### 📥 Export Historical Attendance Matrix Ledger")
         down_col1, down_col2 = st.columns(2)
         
