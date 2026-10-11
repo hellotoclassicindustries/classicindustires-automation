@@ -1701,3 +1701,186 @@ with formula_col1:
             * 10000
         )
         / 10000.00
+)
+
+    st.latex(
+        r"\mathrm{Daily\ Allocation\ Rate}"
+        r" = "
+        r"\frac{\mathrm{Base\ Monthly\ Compensation}}"
+        r"{\mathrm{Days\ in\ Selected\ Month}}"
+    )
+
+    st.latex(
+        r"\mathrm{Rate\ Per\ Hour}"
+        r" = "
+        r"\left\lceil"
+        r"\frac{\mathrm{Daily\ Allocation\ Rate}}"
+        r"{\mathrm{Shift\ Hours}}"
+        r"\times 100"
+        r"\right\rceil \div 100"
+    )
+
+    st.caption(
+        "The hourly rate is rounded upward to the nearest penny."
+    )
+
+    with st.expander(
+        f"🔍 View Hourly Rate Example for "
+        f"{selected_month_label}"
+    ):
+        st.markdown(
+            f"""
+            #### Hourly Rate Example
+
+            - **Selected Payout Month:** {selected_month_label}
+            - **Days in Month:** {selected_month_days}
+            - **Base Monthly Compensation:** {money(example_base_monthly_comp)}
+            - **Configured Shift:** {example_shift_hours:.0f} hours
+            """
+        )
+
+        st.latex(
+            rf"\frac{{{example_base_monthly_comp:,.2f}}}"
+            rf"{{{selected_month_days}}}"
+            rf" = {example_daily_rate:,.4f}"
+        )
+
+        st.latex(
+            rf"\frac{{{example_daily_rate:,.4f}}}"
+            rf"{{{example_shift_hours:.0f}}}"
+            rf" = {example_unrounded_hourly_rate:,.4f}"
+        )
+
+        st.latex(
+            rf"\mathrm{{Rate\ Per\ Hour}}"
+            rf" = \mathrm{{₹}}{example_hourly_rate:,.2f}"
+        )
+
+        st.markdown(
+            f"""
+            The calculated hourly rate for **{selected_month_label}**
+            is **{money(example_hourly_rate)} per hour**.
+            """
+        )
+
+        st.latex(
+            rf"\mathrm{{Rate\ Per\ Minute}}"
+            rf" = "
+            rf"\frac{{{example_hourly_rate:,.2f}}}{{60}}"
+            rf" = {example_per_minute_rate:,.4f}"
+        )
+
+
+# ----------------------------------------------------------------------------
+# ACTUAL DAYS WORKED FORMULA
+# ----------------------------------------------------------------------------
+
+with formula_col2:
+    st.markdown(
+        "**2. Actual Days Worked Calculation**"
+    )
+
+    st.latex(
+        r"\mathrm{Actual\ Days\ Worked}"
+        r" = "
+        r"\frac{\mathrm{Total\ Hours\ Worked}}"
+        r"{\mathrm{Shift\ Hours}}"
+    )
+
+    with st.expander(
+        "🔍 View Days Worked Example"
+    ):
+        example_total_hours = 23.00
+        example_shift_hours_for_days = 8.00
+
+        example_actual_days = round(
+            example_total_hours
+            / example_shift_hours_for_days,
+            2,
+        )
+
+        st.markdown(
+            f"""
+            - **Total Hours Worked:** {example_total_hours:.2f}
+            - **Shift Hours:** {example_shift_hours_for_days:.2f}
+            - **Actual Days Worked:** {example_actual_days:.2f}
+            """
+        )
+
+        st.latex(
+            rf"\frac{{{example_total_hours:.2f}}}"
+            rf"{{{example_shift_hours_for_days:.2f}}}"
+            rf" = {example_actual_days:.2f}"
+        )
+
+
+# ----------------------------------------------------------------------------
+# FINAL PAYOUT FORMULA
+# ----------------------------------------------------------------------------
+
+with formula_col3:
+    st.markdown(
+        "**3. Final Payout Calculation**"
+    )
+
+    st.latex(
+        r"\mathrm{Final\ Payout}"
+        r" = "
+        r"\mathrm{Gross\ Payout}"
+        r" + "
+        r"\mathrm{Total\ Extra\ Amount}"
+        r" - "
+        r"\mathrm{Advance\ Payment}"
+    )
+
+    with st.expander(
+        "🔍 View Final Payout Example"
+    ):
+        example_total_hours = 11.50
+
+        example_gross_payout = round(
+            example_total_hours
+            * example_hourly_rate,
+            2,
+        )
+
+        example_extra_amount = 1500.00
+        example_advance_payment = 500.00
+
+        example_final_payout = round(
+            example_gross_payout
+            + example_extra_amount
+            - example_advance_payment,
+            2,
+        )
+
+        st.markdown(
+            f"""
+            - **Total Hours Worked:** {example_total_hours:.2f}
+            - **Hourly Rate:** {money(example_hourly_rate)}
+            - **Gross Payout:** {money(example_gross_payout)}
+            - **Extra Earnings:** {money(example_extra_amount)}
+            - **Advance Payment:** {money(example_advance_payment)}
+            - **Final Payout:** {money(example_final_payout)}
+            """
+        )
+
+        st.latex(
+            rf"\mathrm{{Gross\ Payout}}"
+            rf" = {example_total_hours:.2f}"
+            rf" \times {example_hourly_rate:,.2f}"
+            rf" = {example_gross_payout:,.2f}"
+        )
+
+        st.latex(
+            rf"\mathrm{{Final\ Payout}}"
+            rf" = {example_gross_payout:,.2f}"
+            rf" + {example_extra_amount:,.2f}"
+            rf" - {example_advance_payment:,.2f}"
+            rf" = {example_final_payout:,.2f}"
+        )
+
+        st.info(
+            "Final payout includes gross attendance payout and "
+            "extra earnings, after deducting advance payment."
+        )
