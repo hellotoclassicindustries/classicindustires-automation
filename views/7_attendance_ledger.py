@@ -428,14 +428,353 @@ else:
 # SELECTED PAYOUT MONTH DETAILS
 # ============================================================================
 
-# The first selected date determines the month shown in the formula example.
 selected_month_label = start_cal.strftime("%B %Y")
+selected_month_key = start_cal.strftime("%Y-%m")
 
 selected_month_days = calendar.monthrange(
     start_cal.year,
     start_cal.month,
 )[1]
 
+
+# ============================================================================
+# PAYROLL ADJUSTMENTS
+# EXTRA EARNINGS AND ADVANCE PAYMENT
+# ============================================================================
+
+if "payroll_adjustments" not in st.session_state:
+    st.session_state["payroll_adjustments"] = {}
+
+
+adjustment_employee_options = {}
+
+for adjustment_item in view_records_data:
+    adjustment_month = (
+        adjustment_item.get("month_year")
+        or "N/A"
+    )
+
+    adjustment_date = parse_row_date(adjustment_month)
+
+    if adjustment_date is None:
+        continue
+
+    adjustment_month_key = adjustment_date.strftime("%Y-%m")
+
+    if adjustment_month_key != selected_month_key:
+        continue
+
+    adjustment_employee_id = str(
+        adjustment_item.get("employee_id")
+        or "N/A"
+    )
+
+    adjustment_employee_name = (
+        adjustment_item.get("employee_name")
+        or "Unnamed"
+    )
+
+    adjustment_employee_options[adjustment_employee_id] = (
+        f"{adjustment_employee_id} - "
+        f"{adjustment_employee_name}"
+    )
+
+
+st.markdown("---")
+st.header("💰 Payroll Adjustments")
+
+st.caption(
+    f"Extra earnings and advance payments for "
+    f"{selected_month_label}"
+)
+
+if not adjustment_employee_options:
+    st.info(
+        "No employees are available for payroll adjustments "
+        f"in {selected_month_label}."
+    )
+
+else:
+    adjustment_employee_ids = sorted(
+        adjustment_employee_options.keys()
+    )
+
+    adjustment_employee_id = st.selectbox(
+        "Select Employee:",
+        options=adjustment_employee_ids,
+        format_func=lambda employee_id: (
+            adjustment_employee_options[employee_id]
+        ),
+        key="payroll_adjustment_employee_id",
+    )
+
+    adjustment_key = (
+        f"{selected_month_key}:"
+        f"{adjustment_employee_id}"
+    )
+
+    saved_adjustment = st.session_state[
+        "payroll_adjustments"
+    ].get(
+        adjustment_key,
+        {
+            "entries": [],
+            "advance_payment": 0.00,
+            "total_extra_amount": 0.00,
+        },
+    )
+
+    adjustment_col1, adjustment_col2 = st.columns(2)
+
+    with adjustment_col1:
+        st.subheader("1. Extra Earnings")
+
+        st.caption(
+            "Add one row for every additional earning."
+        )
+
+    with adjustment_col2:
+        st.subheader("2. Advance Payment")
+
+        st.caption(
+            "The advance payment will be subtracted "
+            "from the gross payout."
+        )
+
+    saved_entries = saved_adjustment.get(
+        "entries",
+        [],
+    )
+
+    entry_rows = []
+
+    for saved_entry in saved_entries:
+        entry_rows.append(
+            {
+                "Particular": saved_entry.get(
+                    "Particular",
+                    "",
+                ),
+                "Quantity": safe_float(
+                    saved_entry.get(
+                        "Quantity",
+                        1.00,
+                    )
+                ),
+                "Rate": safe_float(
+                    saved_entry.get(
+                        "Rate",
+                        0.00,
+                    )
+                ),
+            }
+        )
+
+    while len(entry_rows) < 5:
+        entry_rows.append(
+            {
+                "Particular": "",
+                "Quantity": 1.00,
+                "Rate": 0.00,
+            }
+        )
+
+    with adjustment_col1:
+        extra_entries_df = st.data_editor(
+            pd.DataFrame(entry_rows),
+            hide_index=True,
+            num_rows="dynamic",
+            width="stretch",
+            column_config={
+                "Particular": st.column_config.TextColumn(
+                    "1.a Particulars",
+                    help=(
+                        "Example: transport, special duty, "
+                        "loading/unloading"
+                    ),
+                    width="large",
+                ),
+                "Quantity": st.column_config.NumberColumn(
+                    "1.b Quantity / Hours",
+                    format="%.2f",
+                    min_value=0.00,
+                    step=0.50,
+                    width="medium",
+                ),
+                "Rate": st.column_config.NumberColumn(
+                    "1.c Rate",
+                    format="₹%.2f",
+                    min_value=0.00,
+                    step=1.00,
+                    width="medium",
+                ),
+            },
+            key=(
+                "extra_earning_entries_"
+                f"{selected_month_key}_"
+                f"{adjustment_employee_id}"
+            ),
+        )
+
+    with adjustment_col2:
+        advance_payment = st.number_input(
+            "Advance Payment Amount",
+            min_value=0.00,
+            value=safe_float(
+                saved_adjustment.get(
+                    "advance_payment",
+                    0.00,
+                )
+            ),
+            step=100.00,
+            format="%.2f",
+            key=(
+                "advance_payment_"
+                f"{selected_month_key}_"
+                f"{adjustment_employee_id}"
+            ),
+        )
+
+    cleaned_extra_entries = []
+    extra_entry_display_rows = []
+
+    for _, extra_entry in extra_entries_df.iterrows():
+        particular = str(
+            extra_entry.get(
+                "Particular",
+                "",
+            )
+        ).strip()
+
+        quantity = safe_float(
+            extra_entry.get(
+                "Quantity",
+                0.00,
+            )
+        )
+
+        rate = safe_float(
+            extra_entry.get(
+                "Rate",
+                0.00,
+            )
+        )
+
+        if not particular and quantity <= 0 and rate <= 0:
+            continue
+
+        extra_amount = round(
+            quantity * rate,
+            2,
+        )
+
+        cleaned_extra_entries.append(
+            {
+                "Particular": particular,
+                "Quantity": quantity,
+                "Rate": rate,
+                "Extra_Amount": extra_amount,
+            }
+        )
+
+        extra_entry_display_rows.append(
+            {
+                "Particular": particular or "Unnamed",
+                "Quantity": quantity,
+                "Rate": rate,
+                "Extra Amount": extra_amount,
+            }
+        )
+
+    total_extra_amount = round(
+        sum(
+            entry["Extra_Amount"]
+            for entry in cleaned_extra_entries
+        ),
+        2,
+    )
+
+    net_adjustment = round(
+        total_extra_amount - advance_payment,
+        2,
+    )
+
+    total_col1, total_col2, total_col3 = st.columns(3)
+
+    with total_col1:
+        st.metric(
+            "1.d Total Extra Amount",
+            f"₹{total_extra_amount:,.2f}",
+        )
+
+    with total_col2:
+        st.metric(
+            "2. Advance Payment",
+            f"₹{advance_payment:,.2f}",
+        )
+
+    with total_col3:
+        st.metric(
+            "Net Adjustment",
+            f"₹{net_adjustment:,.2f}",
+        )
+
+    if extra_entry_display_rows:
+        st.markdown("#### Extra-Earning Breakdown")
+
+        st.dataframe(
+            pd.DataFrame(extra_entry_display_rows),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Particular": st.column_config.TextColumn(
+                    "Particular"
+                ),
+                "Quantity": st.column_config.NumberColumn(
+                    "Quantity / Hours",
+                    format="%.2f",
+                ),
+                "Rate": st.column_config.NumberColumn(
+                    "Rate",
+                    format="₹%.2f",
+                ),
+                "Extra Amount": st.column_config.NumberColumn(
+                    "Extra Amount",
+                    format="₹%.2f",
+                ),
+            },
+        )
+
+    if st.button(
+        "💾 Save Payroll Adjustments",
+        key=(
+            "save_payroll_adjustments_"
+            f"{selected_month_key}_"
+            f"{adjustment_employee_id}"
+        ),
+    ):
+        st.session_state[
+            "payroll_adjustments"
+        ][adjustment_key] = {
+            "entries": cleaned_extra_entries,
+            "advance_payment": round(
+                advance_payment,
+                2,
+            ),
+            "total_extra_amount": total_extra_amount,
+        }
+
+        st.success(
+            "Payroll adjustments saved for "
+            f"{adjustment_employee_id}."
+        )
+
+        st.rerun()
+
+
+# ============================================================================
+# EMPLOYEE FILTERS
+# ============================================================================
 
 filter_col1, filter_col2, filter_col3 = st.columns(3)
 
@@ -478,6 +817,46 @@ for item in view_records_data:
     if row_date:
         if not (start_cal <= row_date <= end_cal):
             continue
+
+    employee_id = str(
+        item.get("employee_id")
+        or "N/A"
+    )
+
+    item_month_key = (
+        row_date.strftime("%Y-%m")
+        if row_date
+        else selected_month_key
+    )
+
+    item_adjustment_key = (
+        f"{item_month_key}:{employee_id}"
+    )
+
+    employee_adjustment = st.session_state[
+        "payroll_adjustments"
+    ].get(
+        item_adjustment_key,
+        {
+            "entries": [],
+            "advance_payment": 0.00,
+            "total_extra_amount": 0.00,
+        },
+    )
+
+    total_extra_amount = safe_float(
+        employee_adjustment.get(
+            "total_extra_amount",
+            0.00,
+        )
+    )
+
+    advance_payment = safe_float(
+        employee_adjustment.get(
+            "advance_payment",
+            0.00,
+        )
+    )
 
     total_hours_worked = safe_float(
         item.get("total_hours")
@@ -551,29 +930,58 @@ for item in view_records_data:
             2,
         )
 
+        final_payout = round(
+            calculated_gross_payout
+            + total_extra_amount
+            - advance_payment,
+            2,
+        )
+
     else:
         per_hour_rate = 0.00
         per_minute_rate = 0.00
         calculated_gross_payout = 0.00
 
+        final_payout = round(
+            total_extra_amount
+            - advance_payment,
+            2,
+        )
+
     row_dict = {
         "Month_Year": month_year,
-        "EMP_ID": item.get("employee_id") or "N/A",
+        "EMP_ID": employee_id,
         "EMP_Name": item.get("employee_name") or "Unnamed",
-        "Over_Time": safe_float(item.get("over_time")),
-        "Less_Time": safe_float(item.get("less_time")),
+
+        "Over_Time": safe_float(
+            item.get("over_time")
+        ),
+        "Less_Time": safe_float(
+            item.get("less_time")
+        ),
         "Total_Hours": total_hours_worked,
         "Total_Minutes": total_minutes_worked,
         "Total_Days": total_days_worked,
         "Actual_Days_Worked": actual_days_worked,
+
         "Start_Date": item.get("start_date") or "N/A",
         "Last_Date": item.get("last_day_of_work") or "N/A",
         "EMP_Status": current_status,
+
         "Base_Monthly_Comp": base_monthly_comp,
         "Rate_Per_Hour": per_hour_rate,
         "Rate_Per_Minute": per_minute_rate,
+
         "Gross_Payout": calculated_gross_payout,
-        "Payment_Status": item.get("payment_status") or "Pending",
+        "Total_Extra_Amount": total_extra_amount,
+        "Advance_Payment": advance_payment,
+        "Final_Payout": final_payout,
+
+        "Payment_Status": (
+            item.get("payment_status")
+            or "Pending"
+        ),
+
         "DB_Show_Flag": (
             item.get("show")
             if item.get("show") is not None
@@ -684,6 +1092,9 @@ grid_columns_order = (
         "Rate_Per_Hour",
         "Rate_Per_Minute",
         "Gross_Payout",
+        "Total_Extra_Amount",
+        "Advance_Payment",
+        "Final_Payout",
         "Payment_Status",
         "Start_Date",
         "Last_Date",
@@ -782,10 +1193,31 @@ column_config = {
         width="medium",
         disabled=True,
     ),
+    "Total_Extra_Amount": st.column_config.NumberColumn(
+        "Total Extra Amount",
+        format="₹%.2f",
+        width="medium",
+        disabled=True,
+    ),
+    "Advance_Payment": st.column_config.NumberColumn(
+        "Advance Payment",
+        format="₹%.2f",
+        width="medium",
+        disabled=True,
+    ),
+    "Final_Payout": st.column_config.NumberColumn(
+        "Final Payout",
+        format="₹%.2f",
+        width="medium",
+        disabled=True,
+    ),
     "Payment_Status": st.column_config.SelectboxColumn(
         "Payment Status",
         width="medium",
-        options=["Pending", "Done"],
+        options=[
+            "Pending",
+            "Done",
+        ],
         required=True,
     ),
     "Start_Date": st.column_config.TextColumn(
@@ -807,10 +1239,12 @@ column_config = {
 
 for day_column in all_day_columns:
     if day_column in validated_columns:
-        column_config[day_column] = st.column_config.TextColumn(
-            day_column.replace("D", ""),
-            width=45,
-            disabled=True,
+        column_config[day_column] = (
+            st.column_config.TextColumn(
+                day_column.replace("D", ""),
+                width=45,
+                disabled=True,
+            )
         )
 
 
@@ -851,23 +1285,35 @@ if edited_rows:
         if row_index >= len(render_df):
             continue
 
-        target_employee = render_df.iloc[row_index]["EMP_ID"]
-        target_month = render_df.iloc[row_index]["Month_Year"]
-        updated_status = altered_properties["Payment_Status"]
+        target_employee = render_df.iloc[
+            row_index
+        ]["EMP_ID"]
+
+        target_month = render_df.iloc[
+            row_index
+        ]["Month_Year"]
+
+        updated_status = altered_properties[
+            "Payment_Status"
+        ]
 
         with st.spinner(
-            f"Updating payment status for {target_employee}..."
+            f"Updating payment status for "
+            f"{target_employee}..."
         ):
-            update_successful = update_db_payment_status(
-                target_employee,
-                target_month,
-                updated_status,
+            update_successful = (
+                update_db_payment_status(
+                    target_employee,
+                    target_month,
+                    updated_status,
+                )
             )
 
         if update_successful:
             st.success(
-                f"✓ Payment status updated to '{updated_status}' "
-                f"for Employee ID: {target_employee}"
+                f"✓ Payment status updated to "
+                f"'{updated_status}' for Employee ID: "
+                f"{target_employee}"
             )
 
             st.cache_data.clear()
@@ -881,7 +1327,7 @@ if edited_rows:
 
 
 # ============================================================================
-# PAYROLL & ATTENDANCE WORKFLOW EXPORTS
+# EXPORTS
 # ============================================================================
 
 st.markdown("---")
@@ -901,7 +1347,6 @@ with export_col1:
 
     csv_df = export_df.copy()
 
-    # Preserve attendance values such as 11/30 when opened in Excel.
     for column_name in csv_df.columns:
         if (
             column_name.startswith("D")
@@ -919,13 +1364,17 @@ with export_col1:
             )
 
     csv_buffer = io.StringIO()
+
     csv_df.to_csv(
         csv_buffer,
         index=False,
     )
 
     st.download_button(
-        label="⬇️ Download Ledger as CSV (Preserve Formats)",
+        label=(
+            "⬇️ Download Ledger as CSV "
+            "(Preserve Formats)"
+        ),
         data=csv_buffer.getvalue(),
         file_name=(
             "Historical_Attendance_Ledger_"
@@ -959,6 +1408,9 @@ with export_col2:
             "Rate_Per_Hour",
             "Rate_Per_Minute",
             "Gross_Payout",
+            "Total_Extra_Amount",
+            "Advance_Payment",
+            "Final_Payout",
             "Payment_Status",
             "EMP_Status",
         ]
@@ -1008,7 +1460,8 @@ with export_col2:
         options=row_options,
         default=[],
         help=(
-            "Leave this empty to include all filtered ledger rows."
+            "Leave this empty to include all "
+            "filtered ledger rows."
         ),
         key="ledger_pdf_rows",
     )
@@ -1052,7 +1505,10 @@ with export_col2:
         )
 
     st.download_button(
-        label="⬇️ Download Ledger as PDF (Landscape)",
+        label=(
+            "⬇️ Download Ledger as PDF "
+            "(Landscape)"
+        ),
         data=pdf_data,
         file_name=(
             "Historical_Attendance_Ledger_"
@@ -1065,7 +1521,7 @@ with export_col2:
 
 
 # ============================================================================
-# FORMULAS REFERENCE
+# CALCULATION FORMULAS
 # ============================================================================
 
 st.markdown("---")
@@ -1081,7 +1537,6 @@ formula_col1, formula_col2, formula_col3 = st.columns(3)
 with formula_col1:
     st.markdown("**1. Hourly Rate Calculation**")
 
-    # Example values used only for the expandable explanation.
     example_base_monthly_comp = 25000.00
     example_shift_hours = 8.00
 
@@ -1095,7 +1550,6 @@ with formula_col1:
         / example_shift_hours
     )
 
-    # Match the actual payroll calculation engine.
     example_hourly_rate = (
         math.ceil(
             example_unrounded_hourly_rate * 100
@@ -1117,175 +1571,4 @@ with formula_col1:
     st.latex(
         r"\mathrm{Rate\ Per\ Hour} = "
         r"\left\lceil"
-        r"\frac{\mathrm{Daily\ Allocation\ Rate}}"
-        r"{\mathrm{Shift\ Hours}}"
-        r"\times 100"
-        r"\right\rceil \div 100"
-    )
-
-    st.caption(
-        "The hourly rate is rounded upward to the nearest penny, "
-        "matching the payroll calculation engine."
-    )
-
-    with st.expander(
-        f"🔍 View Hourly Rate Example for {selected_month_label}"
-    ):
-        st.markdown(
-            f"""
-            ##### 💰 Example Hourly Rate Calculation
-
-            The example below uses the month selected above.
-
-            * **Selected Payout Month:** {selected_month_label}
-            * **Days in Month:** {selected_month_days}
-            * **Base Monthly Compensation:** ₹{example_base_monthly_comp:,.2f}
-            * **Configured Shift:** {example_shift_hours:.0f} hours
-
-            **Step 1 — Calculate the daily allocation rate:**
-            """
-        )
-
-        st.latex(
-            rf"\frac{{\mathrm{{₹}}{example_base_monthly_comp:,.2f}}}"
-            rf"{{{selected_month_days}}}"
-            rf" = \mathrm{{₹}}{example_daily_allocation_rate:,.4f}"
-        )
-
-        st.markdown(
-            """
-            **Step 2 — Divide the daily allocation rate by the
-            configured shift hours:**
-            """
-        )
-
-        st.latex(
-            rf"\frac{{\mathrm{{₹}}{example_daily_allocation_rate:,.4f}}}"
-            rf"{{{example_shift_hours:.0f}}}"
-            rf" = \mathrm{{₹}}{example_unrounded_hourly_rate:,.4f}"
-        )
-
-        st.markdown(
-            """
-            **Step 3 — Round upward to the nearest penny:**
-            """
-        )
-
-        st.latex(
-            rf"\mathrm{{Rate\ Per\ Hour}} = "
-            rf"\mathrm{{₹}}{example_hourly_rate:,.2f}"
-        )
-
-        st.markdown(
-            f"""
-            Therefore, using the selected **{selected_month_label}** month,
-            the employee's calculated hourly rate is
-            **₹{example_hourly_rate:,.2f} per hour**.
-
-            The application then calculates the per-minute rate from this
-            rounded hourly rate:
-            """
-        )
-
-        st.latex(
-            rf"\mathrm{{Rate\ Per\ Minute}} = "
-            rf"\left\lceil"
-            rf"\frac{{\mathrm{{₹}}{example_hourly_rate:,.2f}}}{{60}}"
-            rf"\times 10{{,}}000"
-            rf"\right\rceil \div 10{{,}}000"
-            rf" = \mathrm{{₹}}{example_per_minute_rate:,.4f}"
-        )
-
-
-# ============================================================================
-# PROPORTIONAL DAYS FORMULA
-# ============================================================================
-
-with formula_col2:
-    st.markdown("**2. Proportional Days Math**")
-
-    st.latex(
-        r"\mathrm{Actual\ Days\ Worked} = "
-        r"\frac{\mathrm{Total\ Hours\ Worked}}"
-        r"{\mathrm{Shift\ Hours}}"
-    )
-
-    with st.expander(
-        "🔍 View Consistency Proof"
-    ):
-        st.markdown(
-            """
-            ##### 📈 Mathematical Consistency Proof
-
-            Two separate `11/30` entries produce 23 total hours.
-            """
-        )
-
-        st.latex(
-            r"11.5 + 11.5 = 23.0\ \mathrm{Hours}"
-        )
-
-        st.markdown(
-            "Against an 8-hour shift, working `11/30` produces:"
-        )
-
-        st.latex(
-            r"11.5 - 8.0 = 3.5\ "
-            r"\mathrm{Overtime\ Hours}"
-        )
-
-        st.markdown(
-            """
-            Two such days produce exactly **7.0 hours of overtime**.
-            """
-        )
-
-
-# ============================================================================
-# GROSS PAYOUT FORMULA
-# ============================================================================
-
-with formula_col3:
-    st.markdown("**3. Consolidated Gross Payout**")
-
-    st.latex(
-        r"\mathrm{Gross\ Payout} = "
-        r"\mathrm{Total\ Hours\ Worked} \times "
-        r"\mathrm{Rate\ Per\ Hour}"
-    )
-
-    with st.expander(
-        "🔍 View Payout Math Example"
-    ):
-        st.markdown(
-            f"""
-            ##### 💰 Example Calculation Breakdown
-
-            Using the hourly rate calculated in the first section:
-
-            * **Selected Payout Month:** {selected_month_label}
-            * **Days in Month:** {selected_month_days}
-            * **Total Hours Worked:** 11.50
-            * **Rate Per Hour:** ₹{example_hourly_rate:,.2f}
-            """
-        )
-
-        example_gross_payout = round(
-            11.50 * example_hourly_rate,
-            2,
-        )
-
-        st.latex(
-            rf"\mathrm{{Gross\ Payout}}"
-            rf" = 11.5 \times "
-            rf"\mathrm{{₹}}{example_hourly_rate:,.2f}"
-            rf" = \mathrm{{₹}}{example_gross_payout:,.2f}"
-        )
-
-        st.markdown(
-            """
-            The application uses the derived `Rate_Per_Hour`
-            and multiplies it directly by the employee's total
-            logged hours.
-            """
-        )
+        r"\frac{\mathrm{Daily\ Allocation\
