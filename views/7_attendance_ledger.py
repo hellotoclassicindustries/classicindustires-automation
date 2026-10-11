@@ -526,16 +526,34 @@ chosen_dates = st.date_input(
     key="attendance_month_range_picker",
 )
 
-if (
-    isinstance(chosen_dates, (tuple, list))
-    and len(chosen_dates) == 2
-):
-    start_cal = chosen_dates[0]
-    end_cal = chosen_dates[1]
+if isinstance(chosen_dates, (tuple, list)):
+    if len(chosen_dates) >= 2:
+        start_cal = chosen_dates[0]
+        end_cal = chosen_dates[1]
+
+    elif len(chosen_dates) == 1:
+        start_cal = chosen_dates[0]
+        end_cal = chosen_dates[0]
+
+    else:
+        start_cal = default_start
+        end_cal = default_end
 
 else:
+    start_cal = chosen_dates
+    end_cal = chosen_dates
+
+
+if not isinstance(start_cal, datetime.date):
     start_cal = default_start
+
+if not isinstance(end_cal, datetime.date):
     end_cal = default_end
+
+
+if start_cal > end_cal:
+    start_cal, end_cal = end_cal, start_cal
+
 
 selected_month_label = start_cal.strftime(
     "%B %Y"
@@ -545,10 +563,17 @@ selected_month_key = start_cal.strftime(
     "%Y-%m"
 )
 
+
+# [1] is essential because monthrange() returns:
+# (first_weekday, number_of_days)
 selected_month_days = calendar.monthrange(
     start_cal.year,
     start_cal.month,
-)
+)[1]
+
+
+if selected_month_days <= 0:
+    selected_month_days = 31
 # ============================================================================
 # PAYROLL ADJUSTMENTS
 # ============================================================================
