@@ -1019,42 +1019,99 @@ st.header("🧮 Calculation Formulas")
 formula_col1, formula_col2, formula_col3 = st.columns(3)
 
 
+# ============================================================================
+# HOURLY AND PER-MINUTE RATE FORMULAS
+# ============================================================================
+
 with formula_col1:
-    st.markdown("**1. Per Minute Rate Engine**")
+    st.markdown("**1. Hourly Rate Calculation**")
 
     st.latex(
-        r"\mathrm{Rate\ Per\ Min} = "
-        r"\frac{"
-        r"\mathrm{Base\ Monthly\ Comp} / \mathrm{Days\ In\ Month}"
-        r"}"
-        r"{\mathrm{Shift\ Hours} \times 60}"
+        r"\mathrm{Daily\ Allocation\ Rate} = "
+        r"\frac{\mathrm{Base\ Monthly\ Comp}}"
+        r"{\mathrm{Days\ In\ Month}}"
+    )
+
+    st.latex(
+        r"\mathrm{Rate\ Per\ Hour} = "
+        r"\left\lceil"
+        r"\frac{\mathrm{Daily\ Allocation\ Rate}}"
+        r"{\mathrm{Shift\ Hours}}"
+        r"\times 100"
+        r"\right\rceil \div 100"
+    )
+
+    st.caption(
+        "The hourly rate is rounded upward to the nearest penny, "
+        "matching the payroll calculation engine."
     )
 
     with st.expander(
-        "🔍 View Example Verification Details"
+        "🔍 View Hourly Rate Example"
     ):
-        st.markdown("""
-        ##### 📐 In-Memory Precision: Time String Expansion
+        st.markdown(
+            """
+            ##### 💰 Example Hourly Rate Calculation
 
-        Values such as **`11/30`** are interpreted as
-        11 hours and 30 minutes.
+            Assume the following payroll settings:
 
-        * **Extraction Check:** `11/30` becomes 11 hours and 30 minutes.
-        * **Fractional Math Calculation:**
-        """)
+            * **Base Monthly Compensation:** ₹25,000
+            * **Days in Month:** 31
+            * **Configured Shift:** 8 hours
+
+            **Step 1 — Calculate the daily allocation rate:**
+            """
+        )
 
         st.latex(
-            r"\frac{30}{60} = 0.5\ \mathrm{Hours}"
+            r"\frac{₹25{,}000}{31}"
+            r" = ₹806.4516\ldots"
         )
 
         st.markdown(
-            "* **Decimal Aggregation Payout:**"
+            """
+            **Step 2 — Divide the daily rate by the configured shift hours:**
+            """
         )
 
         st.latex(
-            r"11 + 0.5 = 11.5\ \mathrm{Hours}"
+            r"\frac{₹806.4516\ldots}{8}"
+            r" = ₹100.8064\ldots"
         )
 
+        st.markdown(
+            """
+            **Step 3 — Round upward to the nearest penny:**
+            """
+        )
+
+        st.latex(
+            r"\mathrm{Rate\ Per\ Hour} = ₹100.81"
+        )
+
+        st.markdown(
+            """
+            Therefore, the employee's calculated hourly rate is
+            **₹100.81 per hour**.
+
+            The application then calculates the per-minute rate from this
+            rounded hourly rate:
+            """
+        )
+
+        st.latex(
+            r"\mathrm{Rate\ Per\ Minute} = "
+            r"\left\lceil"
+            r"\frac{₹100.81}{60}"
+            r"\times 10{,}000"
+            r"\right\rceil \div 10{,}000"
+            r" = ₹1.6802"
+        )
+
+
+# ============================================================================
+# PROPORTIONAL DAYS FORMULA
+# ============================================================================
 
 with formula_col2:
     st.markdown("**2. Proportional Days Math**")
@@ -1063,27 +1120,28 @@ with formula_col2:
         r"\mathrm{Actual\ Days\ Worked} = "
         r"\frac{"
         r"\mathrm{Total\ Hours\ Worked}"
+        r"}{"
+        r"\mathrm{Shift\ Hours}"
         r"}"
-        r"{\mathrm{Shift\ Hours}}"
     )
 
     with st.expander(
         "🔍 View Consistency Proof"
     ):
-        st.markdown("""
-        ##### 📈 Mathematical Consistency Proof
+        st.markdown(
+            """
+            ##### 📈 Mathematical Consistency Proof
 
-        Two separate `11/30` entries produce
-        23 total hours.
-        """)
+            Two separate `11/30` entries produce 23 total hours.
+            """
+        )
 
         st.latex(
             r"11.5 + 11.5 = 23.0\ \mathrm{Hours}"
         )
 
         st.markdown(
-            "Against an 8-hour shift, working `11/30` "
-            "produces:"
+            "Against an 8-hour shift, working `11/30` produces:"
         )
 
         st.latex(
@@ -1091,10 +1149,15 @@ with formula_col2:
         )
 
         st.markdown(
-            "Two such days produce exactly "
-            "**7.0 hours of overtime**."
+            """
+            Two such days produce exactly **7.0 hours of overtime**.
+            """
         )
 
+
+# ============================================================================
+# GROSS PAYOUT FORMULA
+# ============================================================================
 
 with formula_col3:
     st.markdown("**3. Consolidated Gross Payout**")
@@ -1108,11 +1171,26 @@ with formula_col3:
     with st.expander(
         "🔍 View Payout Math Example"
     ):
-        st.markdown("""
-        ##### 💰 Example Calculation Breakdown
+        st.markdown(
+            """
+            ##### 💰 Example Calculation Breakdown
 
-        * **Hourly Sourcing:** Uses the derived
-          `Rate_Per_Hour` multiplied directly by logged hours.
-        * **Precision Enforced:** Values are rounded according
-          to the configured payroll precision rules.
-        """)
+            Using the hourly rate calculated in the first section:
+
+            * **Total Hours Worked:** 11.50
+            * **Rate Per Hour:** ₹100.81
+            """
+        )
+
+        st.latex(
+            r"\mathrm{Gross\ Payout}"
+            r" = 11.5 \times ₹100.81"
+            r" = ₹1{,}159.32"
+        )
+
+        st.markdown(
+            """
+            The application uses the derived `Rate_Per_Hour` and multiplies
+            it directly by the employee's total logged hours.
+            """
+        )
