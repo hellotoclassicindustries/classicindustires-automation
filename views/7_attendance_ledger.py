@@ -1667,27 +1667,44 @@ formula_col1, formula_col2, formula_col3 = (
 # ----------------------------------------------------------------------------
 
 with formula_col1:
-    st.markdown(
-        "**1. Hourly Rate Calculation**"
+    st.markdown("**1. Hourly Rate Calculation**")
+
+    # Force all calculation inputs to numeric values.
+    example_base_monthly_comp = safe_float(
+        25000.00,
+        default=25000.00,
     )
 
-    example_base_monthly_comp = 25000.00
-    example_shift_hours = 8.00
+    example_shift_hours = safe_float(
+        8.00,
+        default=8.00,
+    )
 
-    example_daily_rate = (
+    example_selected_month_days = int(
+        selected_month_days
+    )
+
+    if example_selected_month_days <= 0:
+        example_selected_month_days = 31
+
+    if example_shift_hours <= 0:
+        example_shift_hours = 8.00
+
+    example_daily_rate = round(
         example_base_monthly_comp
-        / selected_month_days
+        / float(example_selected_month_days),
+        4,
     )
 
-    example_unrounded_hourly_rate = (
+    example_unrounded_hourly_rate = round(
         example_daily_rate
-        / example_shift_hours
+        / example_shift_hours,
+        4,
     )
 
     example_hourly_rate = (
         math.ceil(
-            example_unrounded_hourly_rate
-            * 100
+            example_unrounded_hourly_rate * 100
         )
         / 100.00
     )
@@ -1701,7 +1718,7 @@ with formula_col1:
             * 10000
         )
         / 10000.00
-)
+    )
 
     st.latex(
         r"\mathrm{Daily\ Allocation\ Rate}"
@@ -1733,33 +1750,35 @@ with formula_col1:
             #### Hourly Rate Example
 
             - **Selected Payout Month:** {selected_month_label}
-            - **Days in Month:** {selected_month_days}
+            - **Days in Month:** {example_selected_month_days}
             - **Base Monthly Compensation:** {money(example_base_monthly_comp)}
-            - **Configured Shift:** {example_shift_hours:.0f} hours
+            - **Configured Shift:** {example_shift_hours:.2f} hours
             """
         )
 
         st.latex(
             rf"\frac{{{example_base_monthly_comp:,.2f}}}"
-            rf"{{{selected_month_days}}}"
+            rf"{{{example_selected_month_days}}}"
             rf" = {example_daily_rate:,.4f}"
         )
 
         st.latex(
             rf"\frac{{{example_daily_rate:,.4f}}}"
-            rf"{{{example_shift_hours:.0f}}}"
+            rf"{{{example_shift_hours:.2f}}}"
             rf" = {example_unrounded_hourly_rate:,.4f}"
         )
 
         st.latex(
             rf"\mathrm{{Rate\ Per\ Hour}}"
-            rf" = \mathrm{{₹}}{example_hourly_rate:,.2f}"
+            rf" = "
+            rf"\mathrm{{₹}}{example_hourly_rate:,.2f}"
         )
 
         st.markdown(
             f"""
-            The calculated hourly rate for **{selected_month_label}**
-            is **{money(example_hourly_rate)} per hour**.
+            The calculated hourly rate for
+            **{selected_month_label}** is
+            **{money(example_hourly_rate)} per hour**.
             """
         )
 
@@ -1769,7 +1788,6 @@ with formula_col1:
             rf"\frac{{{example_hourly_rate:,.2f}}}{{60}}"
             rf" = {example_per_minute_rate:,.4f}"
         )
-
 
 # ----------------------------------------------------------------------------
 # ACTUAL DAYS WORKED FORMULA
