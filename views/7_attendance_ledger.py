@@ -60,6 +60,7 @@ HEADERS = {
 
 def safe_float(value):
     """Safely convert a value to float."""
+
     if value is None:
         return 0.00
 
@@ -101,7 +102,9 @@ def fetch_vw_attendance_ledger():
         return []
 
     except requests.RequestException as error:
-        st.warning(f"Unable to connect to the attendance database: {error}")
+        st.warning(
+            f"Unable to connect to the attendance database: {error}"
+        )
         return []
 
 
@@ -136,9 +139,11 @@ def update_db_payment_status(employee_id, month_year, new_status):
 def parse_row_date(month_year_value):
     """
     Convert values such as:
+
     September-2026
     September/2026
     09-2026
+
     into datetime.date(year, month, 1).
     """
 
@@ -171,7 +176,10 @@ def parse_row_date(month_year_value):
         ):
             return datetime.date(year, month_number, 1)
 
-    numeric_values = re.findall(r"\b(\d{1,2})\b", normalized)
+    numeric_values = re.findall(
+        r"\b(\d{1,2})\b",
+        normalized,
+    )
 
     for numeric_value in numeric_values:
         month_number = int(numeric_value)
@@ -197,11 +205,13 @@ def get_days_in_month(month_year_value):
 
 
 def generate_ledger_matrix_pdf(dataframe):
-    """
-    Generate a landscape PDF from the selected rows and columns.
-    """
+    """Generate a landscape PDF from the selected rows and columns."""
 
-    if dataframe is None or dataframe.empty or len(dataframe.columns) == 0:
+    if (
+        dataframe is None
+        or dataframe.empty
+        or len(dataframe.columns) == 0
+    ):
         return b""
 
     pdf_buffer = io.BytesIO()
@@ -245,16 +255,13 @@ def generate_ledger_matrix_pdf(dataframe):
         alignment=1,
     )
 
-    story = []
-
-    story.append(
+    story = [
         Paragraph(
             "Payroll & Attendance Ledger",
             title_style,
-        )
-    )
-
-    story.append(Spacer(1, 10))
+        ),
+        Spacer(1, 10),
+    ]
 
     headers = list(dataframe.columns)
 
@@ -293,7 +300,10 @@ def generate_ledger_matrix_pdf(dataframe):
 
     available_width = 752
     column_count = len(headers)
-    column_width = max(20, available_width / column_count)
+    column_width = max(
+        20,
+        available_width / column_count,
+    )
 
     ledger_table = Table(
         table_data,
@@ -407,11 +417,24 @@ chosen_dates = st.date_input(
     key="unique_attendance_calendar_range_picker",
 )
 
-if isinstance(chosen_dates, tuple) and len(chosen_dates) == 2:
+if isinstance(chosen_dates, (tuple, list)) and len(chosen_dates) == 2:
     start_cal, end_cal = chosen_dates
 else:
     start_cal = default_start
     end_cal = default_end
+
+
+# ============================================================================
+# SELECTED PAYOUT MONTH DETAILS
+# ============================================================================
+
+# The first selected date determines the month shown in the formula example.
+selected_month_label = start_cal.strftime("%B %Y")
+
+selected_month_days = calendar.monthrange(
+    start_cal.year,
+    start_cal.month,
+)[1]
 
 
 filter_col1, filter_col2, filter_col3 = st.columns(3)
@@ -561,8 +584,13 @@ for item in view_records_data:
     for day_number in range(1, 32):
         day_column = f"D{day_number:02d}"
 
-        if days_list and day_number - 1 < len(days_list):
-            row_dict[day_column] = days_list[day_number - 1]
+        if (
+            days_list
+            and day_number - 1 < len(days_list)
+        ):
+            row_dict[day_column] = (
+                days_list[day_number - 1]
+            )
         else:
             row_dict[day_column] = ""
 
@@ -583,7 +611,9 @@ if df.empty:
     st.stop()
 
 
-filtered_df = df[df["DB_Show_Flag"] == True].copy()
+filtered_df = df[
+    df["DB_Show_Flag"] == True
+].copy()
 
 if search_mat_id:
     filtered_df = filtered_df[
@@ -667,7 +697,9 @@ validated_columns = [
     if column_name in filtered_df.columns
 ]
 
-render_df = filtered_df[validated_columns].copy()
+render_df = filtered_df[
+    validated_columns
+].copy()
 
 
 # ============================================================================
@@ -840,6 +872,7 @@ if edited_rows:
 
             st.cache_data.clear()
             st.rerun()
+
         else:
             st.error(
                 f"Unable to update payment status for "
@@ -874,7 +907,9 @@ with export_col1:
             column_name.startswith("D")
             and column_name[1:].isdigit()
         ):
-            csv_df[column_name] = csv_df[column_name].apply(
+            csv_df[column_name] = csv_df[
+                column_name
+            ].apply(
                 lambda value: (
                     f"\t{value}"
                     if isinstance(value, str)
@@ -884,7 +919,10 @@ with export_col1:
             )
 
     csv_buffer = io.StringIO()
-    csv_df.to_csv(csv_buffer, index=False)
+    csv_df.to_csv(
+        csv_buffer,
+        index=False,
+    )
 
     st.download_button(
         label="⬇️ Download Ledger as CSV (Preserve Formats)",
@@ -905,7 +943,9 @@ with export_col1:
 with export_col2:
     st.subheader("📄 PDF Export")
 
-    available_pdf_columns = list(export_df.columns)
+    available_pdf_columns = list(
+        export_df.columns
+    )
 
     default_pdf_columns = [
         column_name
@@ -935,10 +975,23 @@ with export_col2:
     row_options = []
     row_lookup = {}
 
-    for position, (_, row) in enumerate(export_df.iterrows()):
-        employee_id = row.get("EMP_ID", "N/A")
-        employee_name = row.get("EMP_Name", "Unnamed")
-        month_year = row.get("Month_Year", "N/A")
+    for position, (_, row) in enumerate(
+        export_df.iterrows()
+    ):
+        employee_id = row.get(
+            "EMP_ID",
+            "N/A",
+        )
+
+        employee_name = row.get(
+            "EMP_Name",
+            "Unnamed",
+        )
+
+        month_year = row.get(
+            "Month_Year",
+            "N/A",
+        )
 
         label = (
             f"{position + 1}. "
@@ -969,6 +1022,7 @@ with export_col2:
         pdf_target_df = export_df.iloc[
             selected_row_positions
         ].copy()
+
     else:
         pdf_target_df = export_df.copy()
 
@@ -976,6 +1030,7 @@ with export_col2:
         pdf_target_df = pdf_target_df[
             selected_pdf_columns
         ].copy()
+
     else:
         pdf_target_df = pd.DataFrame()
 
@@ -1020,16 +1075,43 @@ formula_col1, formula_col2, formula_col3 = st.columns(3)
 
 
 # ============================================================================
-# HOURLY AND PER-MINUTE RATE FORMULAS
+# HOURLY RATE FORMULA
 # ============================================================================
 
 with formula_col1:
     st.markdown("**1. Hourly Rate Calculation**")
 
+    # Example values used only for the expandable explanation.
+    example_base_monthly_comp = 25000.00
+    example_shift_hours = 8.00
+
+    example_daily_allocation_rate = (
+        example_base_monthly_comp
+        / selected_month_days
+    )
+
+    example_unrounded_hourly_rate = (
+        example_daily_allocation_rate
+        / example_shift_hours
+    )
+
+    # Match the actual payroll calculation engine.
+    example_hourly_rate = (
+        math.ceil(
+            example_unrounded_hourly_rate * 100
+        ) / 100.0
+    )
+
+    example_per_minute_rate = (
+        math.ceil(
+            (example_hourly_rate / 60.0) * 10000
+        ) / 10000.0
+    )
+
     st.latex(
         r"\mathrm{Daily\ Allocation\ Rate} = "
         r"\frac{\mathrm{Base\ Monthly\ Comp}}"
-        r"{\mathrm{Days\ In\ Month}}"
+        r"{\mathrm{Days\ In\ Selected\ Month}}"
     )
 
     st.latex(
@@ -1047,36 +1129,40 @@ with formula_col1:
     )
 
     with st.expander(
-        "🔍 View Hourly Rate Example"
+        f"🔍 View Hourly Rate Example for {selected_month_label}"
     ):
         st.markdown(
-            """
+            f"""
             ##### 💰 Example Hourly Rate Calculation
 
-            Assume the following payroll settings:
+            The example below uses the month selected above.
 
-            * **Base Monthly Compensation:** ₹25,000
-            * **Days in Month:** 31
-            * **Configured Shift:** 8 hours
+            * **Selected Payout Month:** {selected_month_label}
+            * **Days in Month:** {selected_month_days}
+            * **Base Monthly Compensation:** ₹{example_base_monthly_comp:,.2f}
+            * **Configured Shift:** {example_shift_hours:.0f} hours
 
             **Step 1 — Calculate the daily allocation rate:**
             """
         )
 
         st.latex(
-            r"\frac{₹25{,}000}{31}"
-            r" = ₹806.4516\ldots"
+            rf"\frac{{\mathrm{{₹}}{example_base_monthly_comp:,.2f}}}"
+            rf"{{{selected_month_days}}}"
+            rf" = \mathrm{{₹}}{example_daily_allocation_rate:,.4f}"
         )
 
         st.markdown(
             """
-            **Step 2 — Divide the daily rate by the configured shift hours:**
+            **Step 2 — Divide the daily allocation rate by the
+            configured shift hours:**
             """
         )
 
         st.latex(
-            r"\frac{₹806.4516\ldots}{8}"
-            r" = ₹100.8064\ldots"
+            rf"\frac{{\mathrm{{₹}}{example_daily_allocation_rate:,.4f}}}"
+            rf"{{{example_shift_hours:.0f}}}"
+            rf" = \mathrm{{₹}}{example_unrounded_hourly_rate:,.4f}"
         )
 
         st.markdown(
@@ -1086,13 +1172,15 @@ with formula_col1:
         )
 
         st.latex(
-            r"\mathrm{Rate\ Per\ Hour} = ₹100.81"
+            rf"\mathrm{{Rate\ Per\ Hour}} = "
+            rf"\mathrm{{₹}}{example_hourly_rate:,.2f}"
         )
 
         st.markdown(
-            """
-            Therefore, the employee's calculated hourly rate is
-            **₹100.81 per hour**.
+            f"""
+            Therefore, using the selected **{selected_month_label}** month,
+            the employee's calculated hourly rate is
+            **₹{example_hourly_rate:,.2f} per hour**.
 
             The application then calculates the per-minute rate from this
             rounded hourly rate:
@@ -1100,12 +1188,12 @@ with formula_col1:
         )
 
         st.latex(
-            r"\mathrm{Rate\ Per\ Minute} = "
-            r"\left\lceil"
-            r"\frac{₹100.81}{60}"
-            r"\times 10{,}000"
-            r"\right\rceil \div 10{,}000"
-            r" = ₹1.6802"
+            rf"\mathrm{{Rate\ Per\ Minute}} = "
+            rf"\left\lceil"
+            rf"\frac{{\mathrm{{₹}}{example_hourly_rate:,.2f}}}{{60}}"
+            rf"\times 10{{,}}000"
+            rf"\right\rceil \div 10{{,}}000"
+            rf" = \mathrm{{₹}}{example_per_minute_rate:,.4f}"
         )
 
 
@@ -1118,11 +1206,8 @@ with formula_col2:
 
     st.latex(
         r"\mathrm{Actual\ Days\ Worked} = "
-        r"\frac{"
-        r"\mathrm{Total\ Hours\ Worked}"
-        r"}{"
-        r"\mathrm{Shift\ Hours}"
-        r"}"
+        r"\frac{\mathrm{Total\ Hours\ Worked}}"
+        r"{\mathrm{Shift\ Hours}}"
     )
 
     with st.expander(
@@ -1145,7 +1230,8 @@ with formula_col2:
         )
 
         st.latex(
-            r"11.5 - 8.0 = 3.5\ \mathrm{Overtime\ Hours}"
+            r"11.5 - 8.0 = 3.5\ "
+            r"\mathrm{Overtime\ Hours}"
         )
 
         st.markdown(
@@ -1172,25 +1258,34 @@ with formula_col3:
         "🔍 View Payout Math Example"
     ):
         st.markdown(
-            """
+            f"""
             ##### 💰 Example Calculation Breakdown
 
             Using the hourly rate calculated in the first section:
 
+            * **Selected Payout Month:** {selected_month_label}
+            * **Days in Month:** {selected_month_days}
             * **Total Hours Worked:** 11.50
-            * **Rate Per Hour:** ₹100.81
+            * **Rate Per Hour:** ₹{example_hourly_rate:,.2f}
             """
         )
 
+        example_gross_payout = round(
+            11.50 * example_hourly_rate,
+            2,
+        )
+
         st.latex(
-            r"\mathrm{Gross\ Payout}"
-            r" = 11.5 \times ₹100.81"
-            r" = ₹1{,}159.32"
+            rf"\mathrm{{Gross\ Payout}}"
+            rf" = 11.5 \times "
+            rf"\mathrm{{₹}}{example_hourly_rate:,.2f}"
+            rf" = \mathrm{{₹}}{example_gross_payout:,.2f}"
         )
 
         st.markdown(
             """
-            The application uses the derived `Rate_Per_Hour` and multiplies
-            it directly by the employee's total logged hours.
+            The application uses the derived `Rate_Per_Hour`
+            and multiplies it directly by the employee's total
+            logged hours.
             """
         )
