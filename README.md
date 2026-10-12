@@ -88,3 +88,16 @@ TABLE_NAME = "staging_ledger"
 
 ---
 🔒 *Internal Proprietary System — Authorized Personnel Only.*
+## Streamlit data soruce
+| Application area | Database object | Operation |
+|---|---|---|
+| Load attendance | `vw_attendance_ledger` | Read |
+| Attendance source | `raw_attendance_feed` | Read through view |
+| Employee information | `cntr_employee_master` | Read through view |
+| Change payment status | `raw_attendance_feed` | Update |
+| Extra-work entries | `st.session_state` | Temporary memory only |
+| Advance payment | `st.session_state` | Temporary memory only |
+| Total extra amount | `st.session_state` | Temporary memory only |
+| Final payout | Python calculation | Not stored |
+| CSV/PDF | Python-generated data | Export only |
+| `payroll_adjustments_live` | Not referenced | No operation |
