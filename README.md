@@ -89,6 +89,8 @@ TABLE_NAME = "staging_ledger"
 ---
 🔒 *Internal Proprietary System — Authorized Personnel Only.*
 ## Streamlit data soruce
+### Current database reference map
+
 | Application area | Database object | Operation |
 |---|---|---|
 | Load attendance | `vw_attendance_ledger` | Read |
