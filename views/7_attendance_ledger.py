@@ -436,7 +436,7 @@ if edited_rows:
                     st.error(f"Unable to update status for ID {target_emp}.")
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 7
-# DATA FILE EXPORT INTERFACES & LATEX REFRESH REFERENCE BLOCKS
+# DATA FILE EXPORT INTERFACES & DYNAMIC EXPANSIBLE EXAMPLES
 # ============================================================================
 
 st.markdown("---")
@@ -463,25 +463,83 @@ with export_col2:
     row_opts = [f"{i+1}. {r.get('EMP_ID','N/A')} - {r.get('EMP_Name','Unnamed')} - {r.get('Month_Year','N/A')}" for i, (_, r) in enumerate(export_df.iterrows())]
     sel_rows = st.multiselect("Select PDF rows:", options=row_opts, default=[], help="Leave empty to include all filtered rows.", key="ledger_pdf_rows")
 
-    pdf_tgt = export_df.iloc[[int(r.split(".")[0]) - 1 for r in sel_rows]].copy() if sel_rows else export_df.copy()
+    pdf_tgt = export_df.iloc[[int(r.split(".")) - 1 for r in sel_rows]].copy() if sel_rows else export_df.copy()
     pdf_tgt = pdf_tgt[sel_cols].copy() if sel_cols else pd.DataFrame()
     pdf_data = generate_ledger_pdf(pdf_tgt) if not pdf_tgt.empty else b""
     st.download_button("⬇️ Download Ledger as PDF", data=pdf_data, file_name=f"Attendance_Ledger_{datetime.date.today()}.pdf", mime="application/pdf", key="ledger_pdf_download", disabled=not bool(pdf_data))
 
+# ============================================================================
+# DYNAMIC CALCULATION REFERENCE SYSTEM
+# ============================================================================
 st.markdown("---")
 st.header("🧮 Calculation Formulas")
 f_col1, f_col2, f_col3 = st.columns(3)
+
+# Locate the active employee data matching the selector from Part 4
+active_emp_id = st.session_state.get("payroll_adjustment_employee")
+emp_record = df[df["EMP_ID"] == active_emp_id]
+
+if not emp_record.empty:
+    target_row = emp_record.iloc[0]
+    calc_name = target_row["EMP_Name"]
+    calc_base = target_row["Base_Monthly_Comp"]
+    calc_hours = target_row["Total_Hours"]
+    calc_gross = target_row["Gross_Payout"]
+    calc_extra = target_row["Total_Extra_Amount"]
+    calc_advance = target_row["Advance_Payment"]
+    calc_final = target_row["Final_Payout"]
+    
+    # Read the active shift hours from raw dataset to dynamically scale logic
+    raw_item = next((item for item in view_records_data if str(item.get("employee_id")) == str(active_emp_id)), {})
+    calc_shift = max(1.00, safe_float(raw_item.get("shift_hours"), default=8.00))
+else:
+    calc_name, calc_base, calc_hours, calc_shift, calc_gross, calc_extra, calc_advance, calc_final = "Example", 25000.0, 176.0, 8.0, 13200.0, 0.0, 0.0, 13200.0
+
+days_in_active_month = int(selected_month_days)
+step_daily_rate = calc_base / days_in_active_month
+step_hourly_unrounded = step_daily_rate / calc_shift
+step_hourly = math.ceil(step_hourly_unrounded * 100) / 100.00
+step_minute = math.ceil((step_hourly / 60.00) * 10000) / 10000.00
+step_days_worked = round(calc_hours / calc_shift, 2)
 
 with f_col1:
     st.markdown("**1. Hourly Rate Calculation**")
     st.latex(r"\mathrm{Daily\ Rate} = \frac{\mathrm{Base\ Monthly\ Comp}}{\mathrm{Days\ in\ Month}}")
     st.latex(r"\mathrm{Rate\ Per\ Hour} = \left\lceil \frac{\mathrm{Daily\ Rate}}{\mathrm{Shift\ Hours}} \times 100 \right\rceil \div 100")
     st.caption("The hourly rate rounds upward to the nearest penny.")
+    
+    with st.expander(f"🔍 View Live Example ({calc_name})"):
+        st.markdown(f"""
+        - **Target Employee:** {calc_name} ({active_emp_id})
+        - **Month Days:** {days_in_active_month} days
+        - **Base Wage Structure:** {money(calc_base)}
+        - **Shift Assignment:** {calc_shift:.1f} Hours
+        """)
+        st.latex(rf"\frac{{{calc_base:,.2f}}}{{{days_in_active_month}}} = {step_daily_rate:,.4f}\ \mathrm{{per\ day}}")
+        st.latex(rf"\frac{{{step_daily_rate:,.4f}}}{{{calc_shift:.1f}}} = {step_hourly_unrounded:,.4f}")
+        st.latex(rf"\mathrm{{Final\ Hourly\ Rate}} = {money(step_hourly)}")
+        st.latex(rf"\mathrm{{Per\ Minute\ Multiplier}} = {step_minute:,.4f}")
 
 with f_col2:
     st.markdown("**2. Actual Days Worked Calculation**")
     st.latex(r"\mathrm{Actual\ Days\ Worked} = \frac{\mathrm{Total\ Hours\ Worked}}{\mathrm{Shift\ Hours}}")
+    
+    with st.expander(f"🔍 View Live Example ({calc_name})"):
+        st.markdown(f"""
+        - **Total Logged Time:** {calc_hours:.2f} Hours
+        - **Shift Standard:** {calc_shift:.1f} Hours
+        """)
+        st.latex(rf"\frac{{{calc_hours:.2f}}}{{{calc_shift:.1f}}} = {step_days_worked:.2f}\ \mathrm{{Days}}")
 
 with f_col3:
     st.markdown("**3. Final Payout Calculation**")
     st.latex(r"\mathrm{Final\ Payout} = \mathrm{Gross\ Payout} + \mathrm{Extra\ Amount} - \mathrm{Advance\ Payment}")
+    
+    with st.expander(f"🔍 View Live Example ({calc_name})"):
+        st.markdown(f"""
+        - **Gross Hours Earned:** {money(calc_gross)}
+        - **Extra Incentive Bonuses:** +{money(calc_extra)}
+        - **Advance Draws Deducted:** -{money(calc_advance)}
+        """)
+        st.latex(rf"{calc_gross:,.2f} + {calc_extra:,.2f} - {calc_advance:,.2f} = {calc_final:,.2f}")
+        st.info(f"Final net payload calculated for **{calc_name}** is **{money(calc_final)}**.")
