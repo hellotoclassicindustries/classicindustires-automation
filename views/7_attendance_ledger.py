@@ -123,7 +123,7 @@ def clean_text(value):
     return "" if value is None else str(value).strip()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 3
-# SUPABASE OPERATIONS & PDF GENERATION (WITH LIVE PERSISTENCE MAPPING)
+# SUPABASE OPERATIONS & PDF GENERATION (WITH LIVE RELATIONAL PERSISTENCE)
 # ============================================================================
 
 @st.cache_data(ttl=2)
@@ -141,7 +141,6 @@ def fetch_vw_attendance_ledger():
         st.error(f"Unable to connect to Supabase: {error}")
         return []
 
-
 def update_db_payment_status(employee_id, month_year, new_status):
     """Update payout transactional status fields in database."""
     endpoint = f"{SUPABASE_URL}/rest/v1/raw_attendance_feed?employee_id=eq.{employee_id}&month_year=eq.{month_year}"
@@ -152,30 +151,39 @@ def update_db_payment_status(employee_id, month_year, new_status):
     except requests.RequestException:
         return False
 
-
 # ----------------------------------------------------------------------------
-# NEW ADDITIONS: PAYROLL ADJUSTMENTS DATABASE SYNC ENGINE
+# RELATIONAL PAYROLL ADJUSTMENTS DATABASE SYNC ENGINE
 # ----------------------------------------------------------------------------
 
 def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, rate, payment, advance):
-    """Upsert adjustment records securely into payroll_adjustments_live database table."""
+    """Upsert adjustment records securely into payroll_adjustments_live mapping to bigint FK."""
     endpoint = f"{SUPABASE_URL}/rest/v1/payroll_adjustments_live"
     
+    # Locate the matching internal bigint serial ID from the active dataset row mapping
+    internal_bigint_id = None
+    for item in view_records_data:
+        if str(item.get("employee_id")).strip() == str(employee_id).strip():
+            internal_bigint_id = item.get("id")
+            break
+
+    if internal_bigint_id is None:
+        st.error(f"✕ Verification Error: Could not locate internal relational database index for {employee_id}.")
+        return False
+
     headers = HEADERS.copy()
-    # Directs Supabase to execute an UPSERT using the employee/month unique key bounds
     headers["Prefer"] = "resolution=merge-duplicates,return=representation"
     headers["On-Conflict"] = "employee_id,month_year"
 
     payload = {
-        "employee_id": int(employee_id),
-        "month_year": str(month_key),  # Formatted as YYYY-MM to pass check constraints
+        "employee_id": int(internal_bigint_id),  # Safely sends the exact bigint primary key index link
+        "month_year": str(month_key),             # Passes exact checked YYYY-MM code string format
         "extra_work_type": str(type_label),
         "extra_work_quantity": float(qty),
         "extra_work_rate": float(rate),
         "rate_unit": "Fixed",
         "extra_work_payment": float(payment),
         "advance_given": float(advance),
-        "adjustment_notes": "Processed automatically via Dashboard Admin Console.",
+        "adjustment_notes": "Processed automatically via Streamlit Live UI Console.",
         "adjustment_status": "Pending",
         "source_identifier": "STREAMLIT_LIVE_UI",
         "created_by": "STREAMLIT_USER"
@@ -187,7 +195,6 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
     except requests.RequestException:
         return False
 
-
 def load_db_payroll_adjustments_live(month_key):
     """Fetch previously saved backend adjustment records for a given month key."""
     endpoint = f"{SUPABASE_URL}/rest/v1/payroll_adjustments_live?month_year=eq.{month_key}"
@@ -198,7 +205,6 @@ def load_db_payroll_adjustments_live(month_key):
         return []
     except requests.RequestException:
         return []
-
 
 # ----------------------------------------------------------------------------
 # PDF LOGIC ENGINE
@@ -249,7 +255,7 @@ def generate_ledger_pdf(dataframe):
     return buffer.getvalue()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A
-# DATE FILTERS & SUPABASE SYNC LOGIC
+# DATE FILTERS & RELATIONAL CACHE SYNCHRONIZATION
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -266,7 +272,7 @@ previous_month = today - relativedelta(months=1)
 
 default_start = previous_month.replace(day=1)
 default_end = previous_month.replace(
-    day=calendar.monthrange(previous_month.year, previous_month.month)[1]
+    day=calendar.monthrange(previous_month.year, previous_month.month)
 )
 
 st.header("📋 Payroll & Attendance Workflow")
@@ -291,14 +297,14 @@ if start_cal > end_cal:
     start_cal, end_cal = end_cal, start_cal
 
 selected_month_label = start_cal.strftime("%B %Y")
-selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM
+selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM string format
 
 selected_month_days = calendar.monthrange(start_cal.year, start_cal.month)[1]
 if selected_month_days <= 0:
     selected_month_days = 31
 
 # ----------------------------------------------------------------------------
-# 2. SEED SESSION CACHE FROM DATABASE TABLE (PERSISTENCE REFRESH LOOP)
+# 2. SEED SESSION CACHE FROM DATABASE (MAPS RELATIONAL BIGINT BACK TO TEXT ID)
 # ----------------------------------------------------------------------------
 if "payroll_adjustments" not in st.session_state:
     st.session_state["payroll_adjustments"] = {}
@@ -307,8 +313,20 @@ if f"sync_done_{selected_month_key}" not in st.session_state:
     db_adjustments = load_db_payroll_adjustments_live(selected_month_key)
     if db_adjustments:
         for adj in db_adjustments:
-            emp_id = str(adj.get("employee_id"))
-            adj_key = f"{selected_month_key}:{emp_id}"
+            db_internal_id = adj.get("employee_id")
+            
+            # Inverse Matcher: Cross-reference internal database serial key back to user EMP-XXXX code
+            ui_emp_id = None
+            for item in view_records_data:
+                if item.get("id") == db_internal_id:
+                    ui_emp_id = str(item.get("employee_id"))
+                    break
+            
+            # Protect loop execution in case tracking references do not map cleanly
+            if not ui_emp_id:
+                continue
+                
+            adj_key = f"{selected_month_key}:{ui_emp_id}"
             
             st.session_state["payroll_adjustments"][adj_key] = {
                 "entries": [{
@@ -323,7 +341,7 @@ if f"sync_done_{selected_month_key}" not in st.session_state:
     st.session_state[f"sync_done_{selected_month_key}"] = True
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4B
-# INTERACTIVE DATA CONSOLE EDITOR & SECURE STORAGE OPERATIONS
+# INTERACTIVE DATA CONSOLE EDITOR & SECURE STORAGE CONTROLS
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -374,7 +392,7 @@ if adjustment_employee_options:
     while len(entry_rows) < 5:
         entry_rows.append({"Particular": "", "Quantity": 1.00, "Rate": 0.00})
 
-    adjustment_col1, adjustment_col2 = st.columns([2, 1])
+    adjustment_col1, adjustment_col2 = st.columns(2)
 
     with adjustment_col1:
         st.subheader("1. Extra Earning")
@@ -386,7 +404,7 @@ if adjustment_employee_options:
             num_rows="dynamic",
             width="stretch",
             column_config={
-                "Particular": st.column_config.TextColumn("1.a Particulars", help="Example: transport, loading"),
+                "Particular": st.column_config.TextColumn("1.a Particulars", help="Example: transport, loading, unloading"),
                 "Quantity": st.column_config.NumberColumn("1.b Quantity / Hours", min_value=0.00, step=0.50, format="%.2f"),
                 "Rate": st.column_config.NumberColumn("1.c Rate", min_value=0.00, step=1.00, format="₹%.2f")
             },
@@ -407,7 +425,6 @@ if adjustment_employee_options:
         )
 
     cleaned_entries = []
-    breakdown_rows = []
 
     for _, entry in extra_entries_df.iterrows():
         particular = clean_text(entry.get("Particular", ""))
@@ -418,8 +435,12 @@ if adjustment_employee_options:
             continue
 
         extra_amount = round(quantity * rate, 2)
-        cleaned_entries.append({"Particular": particular, "Quantity": quantity, "Rate": rate, "Extra_Amount": extra_amount})
-        breakdown_rows.append({"Particular": particular or "Unnamed", "Quantity / Hours": quantity, "Rate": rate, "Extra Amount": extra_amount})
+        cleaned_entries.append({
+            "Particular": particular,
+            "Quantity": quantity,
+            "Rate": rate,
+            "Extra_Amount": extra_amount
+        })
 
     total_extra_amount = round(sum(e["Extra_Amount"] for e in cleaned_entries), 2)
     net_adjustment = round(total_extra_amount - advance_payment, 2)
@@ -428,10 +449,6 @@ if adjustment_employee_options:
     total_col1.metric("1.d Total Extra Amount", money(total_extra_amount))
     total_col2.metric("2. Advance Payment", money(advance_payment))
     total_col3.metric("Net Adjustment", money(net_adjustment))
-
-   # if breakdown_rows:
-   #     st.markdown("#### Extra-Earning Breakdown")
-   #     st.dataframe(pd.DataFrame(breakdown_rows), hide_index=True, width="stretch", column_config={"Quantity / Hours": st.column_config.NumberColumn(format="%.2f"), "Rate": st.column_config.NumberColumn(format="₹%.2f"), "Extra Amount": st.column_config.NumberColumn(format="₹%.2f")})
 
     # ----------------------------------------------------------------------------
     # 4. DATABASE TRANSMISSION & UPSERT SUBMIT MECHANISM
@@ -460,10 +477,9 @@ if adjustment_employee_options:
             st.cache_data.clear()
             st.rerun()
         else:
-            st.error("✕ Database Save Error: Verify connection status or unique table constraint matches.")
+            st.error("✕ Database Save Error: Target employee mapping not verified or database connection failed.")
 else:
     st.info(f"No employees are available for payroll adjustments in {selected_month_label}.")
-
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 5
 # CORE PAYROLL CALCULATION ENGINE (REPAIRED)
