@@ -121,6 +121,40 @@ def make_adjustment_key(month_key, employee_id):
 
 def clean_text(value):
     return "" if value is None else str(value).strip()
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 3
+# SUPABASE OPERATIONS & PDF GENERATION (RELATIONAL DATA PERSISTENCE)
+# ============================================================================
+
+@st.cache_data(ttl=2)
+def fetch_vw_attendance_ledger():
+    """Fetch attendance summary views from Supabase."""
+    endpoint = f"{SUPABASE_URL}/rest/v1/vw_attendance_ledger?order=month_year.desc,employee_id.asc"
+    try:
+        response = requests.get(endpoint, headers=HEADERS, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            return data if isinstance(data, list) else []
+        st.error(f"Attendance ledger request failed. HTTP {response.status_code}: {response.text}")
+        return []
+    except requests.RequestException as error:
+        st.error(f"Unable to connect to Supabase: {error}")
+        return []
+
+def update_db_payment_status(employee_id, month_year, new_status):
+    """Update payout transactional status fields in database."""
+    endpoint = f"{SUPABASE_URL}/rest/v1/raw_attendance_feed?employee_id=eq.{employee_id}&month_year=eq.{month_year}"
+    payload = {"payment_status": new_status}
+    try:
+        response = requests.patch(endpoint, headers=HEADERS, json=payload, timeout=30)
+        return response.status_code in {200, 201, 204}
+    except requests.RequestException:
+        return False
+
+# ----------------------------------------------------------------------------
+# RELATIONAL PAYROLL ADJUSTMENTS DATABASE SYNC ENGINE
+# ----------------------------------------------------------------------------
+
 def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, rate, payment, advance):
     """Upsert adjustment records securely into payroll_adjustments_live mapping to bigint FK."""
     endpoint = f"{SUPABASE_URL}/rest/v1/payroll_adjustments_live"
@@ -136,15 +170,13 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
         st.error(f"✕ Verification Error: Could not locate internal relational database index for {employee_id}.")
         return False
 
-    # FIX: Explicitly specify matching lowercase headers and resolution constraints
-    # to force PostgREST to perform an UPDATE instead of a duplicate INSERT.
     headers = HEADERS.copy()
-    headers["prefer"] = "resolution=merge-duplicates,return=representation"
-    headers["on-conflict"] = "employee_id,month_year"  # Exact lowercased constraint mapping columns
+    headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+    headers["On-Conflict"] = "employee_id,month_year"  # Strictly matches unique constraint keys
 
     payload = {
-        "employee_id": int(internal_bigint_id),  
-        "month_year": str(month_key),             
+        "employee_id": int(internal_bigint_id),  # Maps perfectly to your table's bigint column
+        "month_year": str(month_key),             # Passes exact checked YYYY-MM code string format
         "extra_work_type": str(type_label),
         "extra_work_quantity": float(qty),
         "extra_work_rate": float(rate),
@@ -159,22 +191,72 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
 
     try:
         response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
-        
-        # If the server confirms a successful save or update transaction
         if response.status_code in {200, 201, 204}:
             return True
-            
-        # Catch and resolve manual duplicate violations gracefully by running a targeted fallback update
-        if response.status_code == 409 or "23505" in response.text:
-            patch_endpoint = f"{endpoint}?employee_id=eq.{internal_bigint_id}&month_year=eq.{month_key}"
-            patch_response = requests.patch(endpoint, headers=HEADERS, json=payload, timeout=30)
-            return patch_response.status_code in {200, 201, 204}
-
         st.error(f"✕ Supabase API Rejection: HTTP {response.status_code} - {response.text}")
         return False
     except requests.RequestException as error:
         st.error(f"✕ Network Connection Failure: {error}")
         return False
+
+def load_db_payroll_adjustments_live(month_key):
+    """Fetch previously saved backend adjustment records for a given month key."""
+    endpoint = f"{SUPABASE_URL}/rest/v1/payroll_adjustments_live?month_year=eq.{month_key}"
+    try:
+        response = requests.get(endpoint, headers=HEADERS, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except requests.RequestException:
+        return []
+
+# ----------------------------------------------------------------------------
+# PDF LOGIC ENGINE
+# ----------------------------------------------------------------------------
+
+def generate_ledger_pdf(dataframe):
+    """Compile multi-column dashboard values into printable PDFs."""
+    if dataframe is None or dataframe.empty or len(dataframe.columns) == 0:
+        return b""
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(
+        buffer, pagesize=landscape(letter),
+        rightMargin=18, leftMargin=18, topMargin=25, bottomMargin=25
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("LedgerTitleStyle", parent=styles["Heading1"], fontSize=13, leading=16, textColor=colors.HexColor("#1A365D"))
+    header_style = ParagraphStyle("LedgerHeaderStyle", parent=styles["Normal"], fontSize=5.5, leading=7, fontName="Helvetica-Bold", textColor=colors.white, alignment=TA_CENTER)
+    cell_style = ParagraphStyle("LedgerCellStyle", parent=styles["Normal"], fontSize=5, leading=6.5, textColor=colors.black, alignment=TA_CENTER)
+
+    story = [Paragraph("Payroll & Attendance Ledger", title_style), Spacer(1, 8)]
+    columns = list(dataframe.columns)
+    table_data = [[Paragraph(escape(str(column)), header_style) for column in columns]]
+
+    for _, row in dataframe.iterrows():
+        table_row = []
+        for column in columns:
+            value = row[column]
+            value_text = "" if pd.isna(value) else (f"{value:.2f}" if isinstance(value, float) else str(value))
+            table_row.append(Paragraph(escape(value_text), cell_style))
+        table_data.append(table_row)
+
+    column_count = len(columns)
+    column_width = max(28, 756 / column_count)
+    table = Table(table_data, colWidths=[column_width] * column_count, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2B6CB0")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E0")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7FAFC")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(table)
+    document.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A
 # DATE FILTERS, CACHE SYNCHRONIZATION & SUBMIT STATE INITIALIZATION
@@ -262,25 +344,140 @@ if f"sync_done_{selected_month_key}" not in st.session_state:
                 "total_extra_amount": float(adj.get("extra_work_payment", 0.00))
             }
     st.session_state[f"sync_done_{selected_month_key}"] = True
-    # ----------------------------------------------------------------------------
-    # 4. SECURE FORM PROCESSING METHOD TO PREVENT DOUBLE-CLICK SAVE DUPLICATIONS
-    # ----------------------------------------------------------------------------
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Wrapping submission elements inside an isolated UI form container
-    with st.form(key=f"payroll_form_container_{selected_month_key}_{selected_adjustment_employee}"):
-        st.write("👉 Confirm adjustment entries before finalizing records transmission.")
-        
-        # Render the save button cleanly inside the form bounds
-        submit_payroll_trigger = st.form_submit_button(
-            label="💾 Save Payroll Adjustments", 
-            use_container_width=True
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4B
+# INTERACTIVE DATA CONSOLE EDITOR & SECURE STORAGE CONTROLS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 3. INTERACTIVE PAYROLL ADJUSTMENTS INTERFACE
+# ----------------------------------------------------------------------------
+adjustment_employee_options = {}
+
+for item in view_records_data:
+    item_month_key = month_key_from_value(item.get("month_year"))
+    if item_month_key != selected_month_key:
+        continue
+
+    employee_id = str(item.get("employee_id") or "N/A")
+    employee_name = item.get("employee_name") or "Unnamed"
+    adjustment_employee_options[employee_id] = f"{employee_id} - {employee_name}"
+
+st.markdown("---")
+st.header("💰 Payroll Adjustments")
+st.caption(f"Extra earnings and advance payments for {selected_month_label}")
+
+if adjustment_employee_options:
+    employee_ids = sorted(adjustment_employee_options.keys())
+
+    selected_adjustment_employee = st.selectbox(
+        "Select Employee:",
+        options=employee_ids,
+        format_func=lambda emp_id: adjustment_employee_options[emp_id],
+        key="payroll_adjustment_employee",
+    )
+
+    current_adjustment_key = make_adjustment_key(selected_month_key, selected_adjustment_employee)
+
+    saved_adjustment = st.session_state["payroll_adjustments"].get(
+        current_adjustment_key,
+        {"entries": [], "advance_payment": 0.00, "total_extra_amount": 0.00}
+    )
+
+    saved_entries = saved_adjustment.get("entries", [])
+    entry_rows = []
+
+    for saved_entry in saved_entries:
+        entry_rows.append({
+            "Particular": saved_entry.get("Particular", ""),
+            "Quantity": safe_float(saved_entry.get("Quantity", 1.00)),
+            "Rate": safe_float(saved_entry.get("Rate", 0.00)),
+        })
+
+    while len(entry_rows) < 5:
+        entry_rows.append({"Particular": "", "Quantity": 1.00, "Rate": 0.00})
+
+    adjustment_col1, adjustment_col2 = st.columns(2)
+
+    with adjustment_col1:
+        st.subheader("1. Extra Earning")
+        st.caption("Add multiple entries. Each amount is Quantity × Rate.")
+
+        extra_entries_df = st.data_editor(
+            pd.DataFrame(entry_rows),
+            hide_index=True,
+            num_rows="dynamic",
+            width="stretch",
+            column_config={
+                "Particular": st.column_config.TextColumn("1.a Particulars", help="Example: transport, loading, unloading"),
+                "Quantity": st.column_config.NumberColumn("1.b Quantity / Hours", min_value=0.00, step=0.50, format="%.2f"),
+                "Rate": st.column_config.NumberColumn("1.c Rate", min_value=0.00, step=1.00, format="₹%.2f")
+            },
+            key=f"extra_earning_entries_{selected_month_key}_{selected_adjustment_employee}",
         )
 
-    if submit_payroll_trigger:
+    with adjustment_col2:
+        st.subheader("2. Advance Payment")
+        st.caption("This amount is subtracted from gross payout.")
+
+        advance_payment = st.number_input(
+            "2. Advance Payment Amount",
+            min_value=0.00,
+            value=safe_float(saved_adjustment.get("advance_payment", 0.00)),
+            step=100.00,
+            format="%.2f",
+            key=f"advance_payment_{selected_month_key}_{selected_adjustment_employee}",
+        )
+
+    cleaned_entries = []
+
+    for _, entry in extra_entries_df.iterrows():
+        particular = clean_text(entry.get("Particular", ""))
+        quantity = safe_float(entry.get("Quantity", 0.00))
+        rate = safe_float(entry.get("Rate", 0.00))
+
+        if not particular and quantity <= 0 and rate <= 0:
+            continue
+
+        extra_amount = round(quantity * rate, 2)
+        cleaned_entries.append({
+            "Particular": particular,
+            "Quantity": quantity,
+            "Rate": rate,
+            "Extra_Amount": extra_amount
+        })
+
+    total_extra_amount = round(sum(e["Extra_Amount"] for e in cleaned_entries), 2)
+    net_adjustment = round(total_extra_amount - advance_payment, 2)
+
+    # FIXED: Restructured metric column rendering layout grid to eliminate stray numbers 
+    # and clean up horizontal spacing issues across screen views.
+    st.markdown("<br>", unsafe_allow_html=True)
+    total_col1, total_col2, total_col3 = st.columns(3)
+    total_col1.metric("1.d Total Extra Amount", money(total_extra_amount))
+    total_col2.metric("2. Advance Payment", money(advance_payment))
+    total_col3.metric("Net Adjustment", money(net_adjustment))
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ----------------------------------------------------------------------------
+    # 4. FIXED: LOADING FORM STATED METHOD TO PREVENT DOUBLE-CLICK SAVE DUPLICATIONS
+    # ----------------------------------------------------------------------------
+    btn_key = f"btn_state_{selected_month_key}_{selected_adjustment_employee}"
+    
+    if btn_key not in st.session_state:
+        st.session_state[btn_key] = False
+
+    if st.session_state[btn_key]:
+        st.button("⌛ Processing Submission...", disabled=True, key=f"disabled_save_{btn_key}")
+    else:
+        if st.button("💾 Save Payroll Adjustments", key=f"active_save_{btn_key}"):
+            st.session_state[btn_key] = True
+            st.rerun()
+
+    # Process active execution thread sequentially right after state re-renders
+    if st.session_state[btn_key]:
         aggregated_type_label = ", ".join([e["Particular"] for e in cleaned_entries if e["Particular"]]) or "Extra Duty Hours"
         
-        # Immediately display a processing mask to block human inputs
         with st.spinner("Securing adjustments database records permanently..."):
             db_success = save_db_payroll_adjustments_live(
                 employee_id=selected_adjustment_employee,
@@ -300,10 +497,16 @@ if f"sync_done_{selected_month_key}" not in st.session_state:
             }
             st.toast(f"✓ Adjustments safely secured for ID {selected_adjustment_employee}!")
             st.success(f"✓ Success: Ledger data permanently recorded for Employee ID {selected_adjustment_employee}.")
+            
+            # Reset button access controls state cleanly before memory re-fresh triggers
+            st.session_state[btn_key] = False
             st.cache_data.clear()
             st.rerun()
         else:
             st.error("✕ Database Transmission Error: Record upsert rejected. Check table configuration structures.")
+            st.session_state[btn_key] = False
+else:
+    st.info(f"No employees are available for payroll adjustments in {selected_month_label}.")
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 5
 # CORE PAYROLL CALCULATION ENGINE (REPAIRED)
