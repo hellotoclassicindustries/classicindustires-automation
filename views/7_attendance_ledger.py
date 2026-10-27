@@ -429,9 +429,9 @@ if adjustment_employee_options:
     total_col2.metric("2. Advance Payment", money(advance_payment))
     total_col3.metric("Net Adjustment", money(net_adjustment))
 
-    if breakdown_rows:
-        st.markdown("#### Extra-Earning Breakdown")
-        st.dataframe(pd.DataFrame(breakdown_rows), hide_index=True, width="stretch", column_config={"Quantity / Hours": st.column_config.NumberColumn(format="%.2f"), "Rate": st.column_config.NumberColumn(format="₹%.2f"), "Extra Amount": st.column_config.NumberColumn(format="₹%.2f")})
+   # if breakdown_rows:
+   #     st.markdown("#### Extra-Earning Breakdown")
+   #     st.dataframe(pd.DataFrame(breakdown_rows), hide_index=True, width="stretch", column_config={"Quantity / Hours": st.column_config.NumberColumn(format="%.2f"), "Rate": st.column_config.NumberColumn(format="₹%.2f"), "Extra Amount": st.column_config.NumberColumn(format="₹%.2f")})
 
     # ----------------------------------------------------------------------------
     # 4. DATABASE TRANSMISSION & UPSERT SUBMIT MECHANISM
