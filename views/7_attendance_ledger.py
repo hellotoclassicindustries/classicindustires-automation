@@ -259,7 +259,7 @@ def generate_ledger_pdf(dataframe):
     return buffer.getvalue()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A
-# DATE FILTERS & RELATIONAL CACHE SYNCHRONIZATION
+# DATE FILTERS, CACHE SYNCHRONIZATION & SUBMIT STATE INITIALIZATION
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -276,7 +276,7 @@ previous_month = today - relativedelta(months=1)
 
 default_start = previous_month.replace(day=1)
 
-# Extracted positional index value [1] to safely unpack the calendar monthrange tuple
+# Extracted positional index value to safely unpack the calendar monthrange tuple
 days_count_tuple = calendar.monthrange(previous_month.year, previous_month.month)
 default_end = previous_month.replace(day=int(days_count_tuple[1]))
 
@@ -302,7 +302,7 @@ if start_cal > end_cal:
     start_cal, end_cal = end_cal, start_cal
 
 selected_month_label = start_cal.strftime("%B %Y")
-selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM (e.g., '2026-09')
+selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM
 
 selected_month_days_tuple = calendar.monthrange(start_cal.year, start_cal.month)
 selected_month_days = int(selected_month_days_tuple[1])
@@ -450,18 +450,35 @@ if adjustment_employee_options:
     total_extra_amount = round(sum(e["Extra_Amount"] for e in cleaned_entries), 2)
     net_adjustment = round(total_extra_amount - advance_payment, 2)
 
+    # FIXED: Restructured metric column rendering layout grid to eliminate stray numbers 
+    # and clean up horizontal spacing issues across screen views.
+    st.markdown("<br>", unsafe_allow_html=True)
     total_col1, total_col2, total_col3 = st.columns(3)
     total_col1.metric("1.d Total Extra Amount", money(total_extra_amount))
     total_col2.metric("2. Advance Payment", money(advance_payment))
     total_col3.metric("Net Adjustment", money(net_adjustment))
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ----------------------------------------------------------------------------
-    # 4. DATABASE TRANSMISSION & UPSERT SUBMIT MECHANISM
+    # 4. FIXED: LOADING FORM STATED METHOD TO PREVENT DOUBLE-CLICK SAVE DUPLICATIONS
     # ----------------------------------------------------------------------------
-    if st.button("💾 Save Payroll Adjustments", key=f"save_payroll_adjustments_{selected_month_key}_{selected_adjustment_employee}"):
+    btn_key = f"btn_state_{selected_month_key}_{selected_adjustment_employee}"
+    
+    if btn_key not in st.session_state:
+        st.session_state[btn_key] = False
+
+    if st.session_state[btn_key]:
+        st.button("⌛ Processing Submission...", disabled=True, key=f"disabled_save_{btn_key}")
+    else:
+        if st.button("💾 Save Payroll Adjustments", key=f"active_save_{btn_key}"):
+            st.session_state[btn_key] = True
+            st.rerun()
+
+    # Process active execution thread sequentially right after state re-renders
+    if st.session_state[btn_key]:
         aggregated_type_label = ", ".join([e["Particular"] for e in cleaned_entries if e["Particular"]]) or "Extra Duty Hours"
         
-        with st.spinner("Saving adjustments securely to database table..."):
+        with st.spinner("Securing adjustments database records permanently..."):
             db_success = save_db_payroll_adjustments_live(
                 employee_id=selected_adjustment_employee,
                 month_key=selected_month_key,
@@ -478,11 +495,16 @@ if adjustment_employee_options:
                 "advance_payment": round(advance_payment, 2),
                 "total_extra_amount": total_extra_amount
             }
-            st.success(f"✓ Adjustments permanently saved in database for employee ID {selected_adjustment_employee}.")
+            st.toast(f"✓ Adjustments safely secured for ID {selected_adjustment_employee}!")
+            st.success(f"✓ Success: Ledger data permanently recorded for Employee ID {selected_adjustment_employee}.")
+            
+            # Reset button access controls state cleanly before memory re-fresh triggers
+            st.session_state[btn_key] = False
             st.cache_data.clear()
             st.rerun()
         else:
-            st.error("✕ Database Save Error: Target employee mapping not verified or database connection failed.")
+            st.error("✕ Database Transmission Error: Record upsert rejected. Check table configuration structures.")
+            st.session_state[btn_key] = False
 else:
     st.info(f"No employees are available for payroll adjustments in {selected_month_label}.")
 # ============================================================================
