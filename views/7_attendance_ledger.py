@@ -123,7 +123,7 @@ def clean_text(value):
     return "" if value is None else str(value).strip()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 3
-# SUPABASE OPERATIONS & PDF GENERATION (WITH LIVE RELATIONAL PERSISTENCE)
+# SUPABASE OPERATIONS & PDF GENERATION (RELATIONAL DATA PERSISTENCE)
 # ============================================================================
 
 @st.cache_data(ttl=2)
@@ -162,7 +162,7 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
     # Locate the matching internal bigint serial ID from the active dataset row mapping
     internal_bigint_id = None
     for item in view_records_data:
-        if str(item.get("employee_id")).strip() == str(employee_id).strip():
+        if str(item.get("employee_id")).strip().upper() == str(employee_id).strip().upper():
             internal_bigint_id = item.get("id")
             break
 
@@ -172,10 +172,10 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
 
     headers = HEADERS.copy()
     headers["Prefer"] = "resolution=merge-duplicates,return=representation"
-    headers["On-Conflict"] = "employee_id,month_year"
+    headers["On-Conflict"] = "employee_id,month_year"  # Strictly matches unique constraint keys
 
     payload = {
-        "employee_id": int(internal_bigint_id),  # Safely sends the exact bigint primary key index link
+        "employee_id": int(internal_bigint_id),  # Maps perfectly to your table's bigint column
         "month_year": str(month_key),             # Passes exact checked YYYY-MM code string format
         "extra_work_type": str(type_label),
         "extra_work_quantity": float(qty),
@@ -191,8 +191,12 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
 
     try:
         response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
-        return response.status_code in {200, 201, 204}
-    except requests.RequestException:
+        if response.status_code in {200, 201, 204}:
+            return True
+        st.error(f"✕ Supabase API Rejection: HTTP {response.status_code} - {response.text}")
+        return False
+    except requests.RequestException as error:
+        st.error(f"✕ Network Connection Failure: {error}")
         return False
 
 def load_db_payroll_adjustments_live(month_key):
@@ -254,7 +258,7 @@ def generate_ledger_pdf(dataframe):
     buffer.seek(0)
     return buffer.getvalue()
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A (FIXED TUPLE UNPACKING)
+# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A
 # DATE FILTERS & RELATIONAL CACHE SYNCHRONIZATION
 # ============================================================================
 
@@ -272,10 +276,9 @@ previous_month = today - relativedelta(months=1)
 
 default_start = previous_month.replace(day=1)
 
-# FIXED: Appended [1] to extract only the actual number of days from the tuple
-default_end = previous_month.replace(
-    day=calendar.monthrange(previous_month.year, previous_month.month)[1]
-)
+# Extracted positional index value [1] to safely unpack the calendar monthrange tuple
+days_count_tuple = calendar.monthrange(previous_month.year, previous_month.month)
+default_end = previous_month.replace(day=int(days_count_tuple[1]))
 
 st.header("📋 Payroll & Attendance Workflow")
 
@@ -299,10 +302,10 @@ if start_cal > end_cal:
     start_cal, end_cal = end_cal, start_cal
 
 selected_month_label = start_cal.strftime("%B %Y")
-selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM
+selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM (e.g., '2026-09')
 
-# FIXED: Appended [1] here as well to protect downstream math checks
-selected_month_days = calendar.monthrange(start_cal.year, start_cal.month)[1]
+selected_month_days_tuple = calendar.monthrange(start_cal.year, start_cal.month)
+selected_month_days = int(selected_month_days_tuple[1])
 if selected_month_days <= 0:
     selected_month_days = 31
 
@@ -318,6 +321,7 @@ if f"sync_done_{selected_month_key}" not in st.session_state:
         for adj in db_adjustments:
             db_internal_id = adj.get("employee_id")
             
+            # Map internal database bigint ID back to the front-end user's text code (e.g., "EMP-1002")
             ui_emp_id = None
             for item in view_records_data:
                 if item.get("id") == db_internal_id:
