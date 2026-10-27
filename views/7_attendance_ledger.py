@@ -254,7 +254,7 @@ def generate_ledger_pdf(dataframe):
     buffer.seek(0)
     return buffer.getvalue()
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A
+# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A (FIXED TUPLE UNPACKING)
 # DATE FILTERS & RELATIONAL CACHE SYNCHRONIZATION
 # ============================================================================
 
@@ -271,8 +271,10 @@ today = datetime.date.today()
 previous_month = today - relativedelta(months=1)
 
 default_start = previous_month.replace(day=1)
+
+# FIXED: Appended [1] to extract only the actual number of days from the tuple
 default_end = previous_month.replace(
-    day=calendar.monthrange(previous_month.year, previous_month.month)
+    day=calendar.monthrange(previous_month.year, previous_month.month)[1]
 )
 
 st.header("📋 Payroll & Attendance Workflow")
@@ -297,8 +299,9 @@ if start_cal > end_cal:
     start_cal, end_cal = end_cal, start_cal
 
 selected_month_label = start_cal.strftime("%B %Y")
-selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM string format
+selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM
 
+# FIXED: Appended [1] here as well to protect downstream math checks
 selected_month_days = calendar.monthrange(start_cal.year, start_cal.month)[1]
 if selected_month_days <= 0:
     selected_month_days = 31
@@ -315,14 +318,12 @@ if f"sync_done_{selected_month_key}" not in st.session_state:
         for adj in db_adjustments:
             db_internal_id = adj.get("employee_id")
             
-            # Inverse Matcher: Cross-reference internal database serial key back to user EMP-XXXX code
             ui_emp_id = None
             for item in view_records_data:
                 if item.get("id") == db_internal_id:
                     ui_emp_id = str(item.get("employee_id"))
                     break
             
-            # Protect loop execution in case tracking references do not map cleanly
             if not ui_emp_id:
                 continue
                 
