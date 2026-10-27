@@ -123,7 +123,7 @@ def clean_text(value):
     return "" if value is None else str(value).strip()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 3
-# SUPABASE OPERATIONS & PDF GENERATION
+# SUPABASE OPERATIONS & PDF GENERATION (WITH LIVE PERSISTENCE MAPPING)
 # ============================================================================
 
 @st.cache_data(ttl=2)
@@ -152,6 +152,57 @@ def update_db_payment_status(employee_id, month_year, new_status):
     except requests.RequestException:
         return False
 
+
+# ----------------------------------------------------------------------------
+# NEW ADDITIONS: PAYROLL ADJUSTMENTS DATABASE SYNC ENGINE
+# ----------------------------------------------------------------------------
+
+def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, rate, payment, advance):
+    """Upsert adjustment records securely into payroll_adjustments_live database table."""
+    endpoint = f"{SUPABASE_URL}/rest/v1/payroll_adjustments_live"
+    
+    headers = HEADERS.copy()
+    # Directs Supabase to execute an UPSERT using the employee/month unique key bounds
+    headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+    headers["On-Conflict"] = "employee_id,month_year"
+
+    payload = {
+        "employee_id": int(employee_id),
+        "month_year": str(month_key),  # Formatted as YYYY-MM to pass check constraints
+        "extra_work_type": str(type_label),
+        "extra_work_quantity": float(qty),
+        "extra_work_rate": float(rate),
+        "rate_unit": "Fixed",
+        "extra_work_payment": float(payment),
+        "advance_given": float(advance),
+        "adjustment_notes": "Processed automatically via Dashboard Admin Console.",
+        "adjustment_status": "Pending",
+        "source_identifier": "STREAMLIT_LIVE_UI",
+        "created_by": "STREAMLIT_USER"
+    }
+
+    try:
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+        return response.status_code in {200, 201, 204}
+    except requests.RequestException:
+        return False
+
+
+def load_db_payroll_adjustments_live(month_key):
+    """Fetch previously saved backend adjustment records for a given month key."""
+    endpoint = f"{SUPABASE_URL}/rest/v1/payroll_adjustments_live?month_year=eq.{month_key}"
+    try:
+        response = requests.get(endpoint, headers=HEADERS, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except requests.RequestException:
+        return []
+
+
+# ----------------------------------------------------------------------------
+# PDF LOGIC ENGINE
+# ----------------------------------------------------------------------------
 
 def generate_ledger_pdf(dataframe):
     """Compile multi-column dashboard values into printable PDFs."""
@@ -197,46 +248,97 @@ def generate_ledger_pdf(dataframe):
     buffer.seek(0)
     return buffer.getvalue()
 # ============================================================================
-# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4
-# DATE MANAGEMENT & ADJUSTMENT MANAGEMENT INTERFACE
+# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4A
+# DATE FILTERS & SUPABASE SYNC LOGIC
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# 1. INITIAL BASELINE DATE & ATTENDANCE RECORD INITIALIZATION
+# ----------------------------------------------------------------------------
 view_records_data = fetch_vw_attendance_ledger()
+
 if not view_records_data:
     st.info("No records were found in vw_attendance_ledger.")
     st.stop()
 
 today = datetime.date.today()
 previous_month = today - relativedelta(months=1)
+
 default_start = previous_month.replace(day=1)
-default_end = previous_month.replace(day=calendar.monthrange(previous_month.year, previous_month.month)[1])
+default_end = previous_month.replace(
+    day=calendar.monthrange(previous_month.year, previous_month.month)[1]
+)
 
 st.header("📋 Payroll & Attendance Workflow")
-chosen_dates = st.date_input("Select Payout Month:", value=(default_start, default_end), key="attendance_month_range_picker")
 
-if isinstance(chosen_dates, (tuple, list)) and len(chosen_dates) >= 2:
-    start_cal, end_cal = chosen_dates[0], chosen_dates[1]
-elif isinstance(chosen_dates, (tuple, list)) and len(chosen_dates) == 1:
-    start_cal, end_cal = chosen_dates[0], chosen_dates[0]
+chosen_dates = st.date_input(
+    "Select Payout Month:",
+    value=(default_start, default_end),
+    key="attendance_month_range_picker",
+)
+
+if isinstance(chosen_dates, (tuple, list)):
+    if len(chosen_dates) >= 2:
+        start_cal, end_cal = chosen_dates[0], chosen_dates[1]
+    elif len(chosen_dates) == 1:
+        start_cal, end_cal = chosen_dates[0], chosen_dates[0]
+    else:
+        start_cal, end_cal = default_start, default_end
 else:
-    start_cal, end_cal = default_start, default_end
+    start_cal, end_cal = chosen_dates, chosen_dates
 
 if start_cal > end_cal:
     start_cal, end_cal = end_cal, start_cal
 
 selected_month_label = start_cal.strftime("%B %Y")
-selected_month_key = start_cal.strftime("%Y-%m")
-selected_month_days = max(1, calendar.monthrange(start_cal.year, start_cal.month)[1])
+selected_month_key = start_cal.strftime("%Y-%m")  # Formatted as YYYY-MM
 
+selected_month_days = calendar.monthrange(start_cal.year, start_cal.month)[1]
+if selected_month_days <= 0:
+    selected_month_days = 31
+
+# ----------------------------------------------------------------------------
+# 2. SEED SESSION CACHE FROM DATABASE TABLE (PERSISTENCE REFRESH LOOP)
+# ----------------------------------------------------------------------------
 if "payroll_adjustments" not in st.session_state:
     st.session_state["payroll_adjustments"] = {}
 
+if f"sync_done_{selected_month_key}" not in st.session_state:
+    db_adjustments = load_db_payroll_adjustments_live(selected_month_key)
+    if db_adjustments:
+        for adj in db_adjustments:
+            emp_id = str(adj.get("employee_id"))
+            adj_key = f"{selected_month_key}:{emp_id}"
+            
+            st.session_state["payroll_adjustments"][adj_key] = {
+                "entries": [{
+                    "Particular": adj.get("extra_work_type", "Extra Earnings"),
+                    "Quantity": float(adj.get("extra_work_quantity", 1.00)),
+                    "Rate": float(adj.get("extra_work_rate", 0.00)),
+                    "Extra_Amount": float(adj.get("extra_work_payment", 0.00))
+                }],
+                "advance_payment": float(adj.get("advance_given", 0.00)),
+                "total_extra_amount": float(adj.get("extra_work_payment", 0.00))
+            }
+    st.session_state[f"sync_done_{selected_month_key}"] = True
+# ============================================================================
+# VIEWS/7_ATTENDANCE_LEDGER.PY - PART 4B
+# INTERACTIVE DATA CONSOLE EDITOR & SECURE STORAGE OPERATIONS
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 3. INTERACTIVE PAYROLL ADJUSTMENTS INTERFACE
+# ----------------------------------------------------------------------------
 adjustment_employee_options = {}
+
 for item in view_records_data:
-    if month_key_from_value(item.get("month_year")) == selected_month_key:
-        emp_id = str(item.get("employee_id") or "N/A")
-        emp_name = item.get("employee_name") or "Unnamed"
-        adjustment_employee_options[emp_id] = f"{emp_id} - {emp_name}"
+    item_month_key = month_key_from_value(item.get("month_year"))
+    if item_month_key != selected_month_key:
+        continue
+
+    employee_id = str(item.get("employee_id") or "N/A")
+    employee_name = item.get("employee_name") or "Unnamed"
+    adjustment_employee_options[employee_id] = f"{employee_id} - {employee_name}"
 
 st.markdown("---")
 st.header("💰 Payroll Adjustments")
@@ -244,54 +346,124 @@ st.caption(f"Extra earnings and advance payments for {selected_month_label}")
 
 if adjustment_employee_options:
     employee_ids = sorted(adjustment_employee_options.keys())
-    selected_adjustment_employee = st.selectbox("Select Employee:", options=employee_ids, format_func=lambda x: adjustment_employee_options[x], key="payroll_adjustment_employee")
-    current_adjustment_key = make_adjustment_key(selected_month_key, selected_adjustment_employee)
-    saved_adjustment = st.session_state["payroll_adjustments"].get(current_adjustment_key, {"entries": [], "advance_payment": 0.00, "total_extra_amount": 0.00})
 
-    entry_rows = [{"Particular": e.get("Particular", ""), "Quantity": safe_float(e.get("Quantity", 1.0)), "Rate": safe_float(e.get("Rate", 0.0))} for e in saved_adjustment.get("entries", [])]
+    selected_adjustment_employee = st.selectbox(
+        "Select Employee:",
+        options=employee_ids,
+        format_func=lambda emp_id: adjustment_employee_options[emp_id],
+        key="payroll_adjustment_employee",
+    )
+
+    current_adjustment_key = make_adjustment_key(selected_month_key, selected_adjustment_employee)
+
+    saved_adjustment = st.session_state["payroll_adjustments"].get(
+        current_adjustment_key,
+        {"entries": [], "advance_payment": 0.00, "total_extra_amount": 0.00}
+    )
+
+    saved_entries = saved_adjustment.get("entries", [])
+    entry_rows = []
+
+    for saved_entry in saved_entries:
+        entry_rows.append({
+            "Particular": saved_entry.get("Particular", ""),
+            "Quantity": safe_float(saved_entry.get("Quantity", 1.00)),
+            "Rate": safe_float(saved_entry.get("Rate", 0.00)),
+        })
+
     while len(entry_rows) < 5:
         entry_rows.append({"Particular": "", "Quantity": 1.00, "Rate": 0.00})
 
     adjustment_col1, adjustment_col2 = st.columns([2, 1])
+
     with adjustment_col1:
         st.subheader("1. Extra Earning")
-        extra_entries_df = st.data_editor(pd.DataFrame(entry_rows), hide_index=True, num_rows="dynamic", width="stretch", column_config={
-            "Particular": st.column_config.TextColumn("1.a Particulars"),
-            "Quantity": st.column_config.NumberColumn("1.b Quantity / Hours", min_value=0.00, step=0.50, format="%.2f"),
-            "Rate": st.column_config.NumberColumn("1.c Rate", min_value=0.00, step=1.00, format="₹%.2f")
-        }, key=f"extra_earning_edit_{selected_month_key}_{selected_adjustment_employee}")
+        st.caption("Add multiple entries. Each amount is Quantity × Rate.")
+
+        extra_entries_df = st.data_editor(
+            pd.DataFrame(entry_rows),
+            hide_index=True,
+            num_rows="dynamic",
+            width="stretch",
+            column_config={
+                "Particular": st.column_config.TextColumn("1.a Particulars", help="Example: transport, loading"),
+                "Quantity": st.column_config.NumberColumn("1.b Quantity / Hours", min_value=0.00, step=0.50, format="%.2f"),
+                "Rate": st.column_config.NumberColumn("1.c Rate", min_value=0.00, step=1.00, format="₹%.2f")
+            },
+            key=f"extra_earning_entries_{selected_month_key}_{selected_adjustment_employee}",
+        )
 
     with adjustment_col2:
         st.subheader("2. Advance Payment")
-        advance_payment = st.number_input("2. Advance Payment Amount", min_value=0.00, value=safe_float(saved_adjustment.get("advance_payment", 0.00)), step=100.00, format="%.2f", key=f"advance_pay_{selected_month_key}_{selected_adjustment_employee}")
+        st.caption("This amount is subtracted from gross payout.")
 
-    cleaned_entries, breakdown_rows = [], []
+        advance_payment = st.number_input(
+            "2. Advance Payment Amount",
+            min_value=0.00,
+            value=safe_float(saved_adjustment.get("advance_payment", 0.00)),
+            step=100.00,
+            format="%.2f",
+            key=f"advance_payment_{selected_month_key}_{selected_adjustment_employee}",
+        )
+
+    cleaned_entries = []
+    breakdown_rows = []
+
     for _, entry in extra_entries_df.iterrows():
-        p = clean_text(entry.get("Particular", ""))
-        q = safe_float(entry.get("Quantity", 0.00))
-        r = safe_float(entry.get("Rate", 0.00))
-        if p or q > 0 or r > 0:
-            amt = round(q * r, 2)
-            cleaned_entries.append({"Particular": p, "Quantity": q, "Rate": r, "Extra_Amount": amt})
-            breakdown_rows.append({"Particular": p or "Unnamed", "Quantity / Hours": q, "Rate": r, "Extra Amount": amt})
+        particular = clean_text(entry.get("Particular", ""))
+        quantity = safe_float(entry.get("Quantity", 0.00))
+        rate = safe_float(entry.get("Rate", 0.00))
+
+        if not particular and quantity <= 0 and rate <= 0:
+            continue
+
+        extra_amount = round(quantity * rate, 2)
+        cleaned_entries.append({"Particular": particular, "Quantity": quantity, "Rate": rate, "Extra_Amount": extra_amount})
+        breakdown_rows.append({"Particular": particular or "Unnamed", "Quantity / Hours": quantity, "Rate": rate, "Extra Amount": extra_amount})
 
     total_extra_amount = round(sum(e["Extra_Amount"] for e in cleaned_entries), 2)
     net_adjustment = round(total_extra_amount - advance_payment, 2)
 
-    t_col1, t_col2, t_col3 = st.columns(3)
-    t_col1.metric("1.d Total Extra Amount", money(total_extra_amount))
-    t_col2.metric("2. Advance Payment", money(advance_payment))
-    t_col3.metric("Net Adjustment", money(net_adjustment))
+    total_col1, total_col2, total_col3 = st.columns(3)
+    total_col1.metric("1.d Total Extra Amount", money(total_extra_amount))
+    total_col2.metric("2. Advance Payment", money(advance_payment))
+    total_col3.metric("Net Adjustment", money(net_adjustment))
 
     if breakdown_rows:
+        st.markdown("#### Extra-Earning Breakdown")
         st.dataframe(pd.DataFrame(breakdown_rows), hide_index=True, width="stretch", column_config={"Quantity / Hours": st.column_config.NumberColumn(format="%.2f"), "Rate": st.column_config.NumberColumn(format="₹%.2f"), "Extra Amount": st.column_config.NumberColumn(format="₹%.2f")})
 
-    if st.button("💾 Save Payroll Adjustments", key=f"save_adj_{selected_month_key}_{selected_adjustment_employee}"):
-        st.session_state["payroll_adjustments"][current_adjustment_key] = {"entries": cleaned_entries, "advance_payment": round(advance_payment, 2), "total_extra_amount": total_extra_amount}
-        st.success(f"Payroll adjustments saved for {selected_adjustment_employee}.")
-        st.rerun()
+    # ----------------------------------------------------------------------------
+    # 4. DATABASE TRANSMISSION & UPSERT SUBMIT MECHANISM
+    # ----------------------------------------------------------------------------
+    if st.button("💾 Save Payroll Adjustments", key=f"save_payroll_adjustments_{selected_month_key}_{selected_adjustment_employee}"):
+        aggregated_type_label = ", ".join([e["Particular"] for e in cleaned_entries if e["Particular"]]) or "Extra Duty Hours"
+        
+        with st.spinner("Saving adjustments securely to database table..."):
+            db_success = save_db_payroll_adjustments_live(
+                employee_id=selected_adjustment_employee,
+                month_key=selected_month_key,
+                type_label=aggregated_type_label,
+                qty=1.00,
+                rate=total_extra_amount,
+                payment=total_extra_amount,
+                advance=advance_payment
+            )
+
+        if db_success:
+            st.session_state["payroll_adjustments"][current_adjustment_key] = {
+                "entries": cleaned_entries,
+                "advance_payment": round(advance_payment, 2),
+                "total_extra_amount": total_extra_amount
+            }
+            st.success(f"✓ Adjustments permanently saved in database for employee ID {selected_adjustment_employee}.")
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error("✕ Database Save Error: Verify connection status or unique table constraint matches.")
 else:
-    st.info(f"No employees are available for adjustments in {selected_month_label}.")
+    st.info(f"No employees are available for payroll adjustments in {selected_month_label}.")
+
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 5
 # CORE PAYROLL CALCULATION ENGINE (REPAIRED)
