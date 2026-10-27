@@ -123,7 +123,7 @@ def clean_text(value):
     return "" if value is None else str(value).strip()
 # ============================================================================
 # VIEWS/7_ATTENDANCE_LEDGER.PY - PART 3
-# SUPABASE OPERATIONS & PDF GENERATION (RELATIONAL DATA PERSISTENCE)
+# SUPABASE OPERATIONS & PDF GENERATION (RELATIONAL DATA PERSISTENCE ENGINE)
 # ============================================================================
 
 @st.cache_data(ttl=2)
@@ -152,7 +152,7 @@ def update_db_payment_status(employee_id, month_year, new_status):
         return False
 
 # ----------------------------------------------------------------------------
-# RELATIONAL PAYROLL ADJUSTMENTS DATABASE SYNC ENGINE
+# RELATIONAL PAYROLL ADJUSTMENTS DATABASE SYNC ENGINE (CONFLICT INSULATED)
 # ----------------------------------------------------------------------------
 
 def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, rate, payment, advance):
@@ -171,12 +171,12 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
         return False
 
     headers = HEADERS.copy()
-    headers["Prefer"] = "resolution=merge-duplicates,return=representation"
-    headers["On-Conflict"] = "employee_id,month_year"  # Strictly matches unique constraint keys
+    headers["prefer"] = "resolution=merge-duplicates,return=representation"
+    headers["on-conflict"] = "employee_id,month_year"  # Exact lowercased unique constraint columns
 
     payload = {
-        "employee_id": int(internal_bigint_id),  # Maps perfectly to your table's bigint column
-        "month_year": str(month_key),             # Passes exact checked YYYY-MM code string format
+        "employee_id": int(internal_bigint_id),  # Linked to public.cntr_employee_master(id) bigint primary key
+        "month_year": str(month_key),             # Regex validated YYYY-MM code string format
         "extra_work_type": str(type_label),
         "extra_work_quantity": float(qty),
         "extra_work_rate": float(rate),
@@ -191,8 +191,17 @@ def save_db_payroll_adjustments_live(employee_id, month_key, type_label, qty, ra
 
     try:
         response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+        
+        # If the server confirms a successful save or update transaction
         if response.status_code in {200, 201, 204}:
             return True
+            
+        # Catch manual duplicate violations and gracefully run a targeted fallback update
+        if response.status_code == 409 or "23505" in response.text:
+            patch_endpoint = f"{endpoint}?employee_id=eq.{internal_bigint_id}&month_year=eq.{month_key}"
+            patch_response = requests.patch(patch_endpoint, headers=HEADERS, json=payload, timeout=30)
+            return patch_response.status_code in {200, 201, 204}
+
         st.error(f"✕ Supabase API Rejection: HTTP {response.status_code} - {response.text}")
         return False
     except requests.RequestException as error:
